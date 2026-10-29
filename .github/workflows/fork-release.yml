@@ -1,0 +1,53 @@
+# Fork only: every push to main builds the Windows x64 release and publishes it as a GitHub release
+# (tag build-<run number>), so the ArtCraft launcher / users can download the newest build.
+name: Fork Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p filmcraft
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/filmcraft.exe dist/
+          Copy-Item docs/plugins.md dist/
+          Compress-Archive -Path dist/* -DestinationPath FilmCraft-win-x64.zip
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="build-${{ github.run_number }}"
+          short="${GITHUB_SHA::8}"
+          gh release create "$tag" FilmCraft-win-x64.zip target/release/filmcraft.exe \
+            --target "$GITHUB_SHA" \
+            --title "FilmCraft (plugins) build ${{ github.run_number }}" \
+            --notes "Automatic build of ${short}: plugin host, Inner Highlight, Inner Shadow, Outer Glow, Glow. Unsigned." \
+            --latest
