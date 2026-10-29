@@ -331,7 +331,7 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             }
             *img = sh;
         }
-        "inner_highlight" => {
+        "inner_highlight" | "inner_shadow" => {
             let c = color(e, "color", cx);
             let op = f(e, "opacity", cx) / 100.0;
             // Light direction uses the Drop Shadow convention (0 = up, clockwise); the cut-out copy
@@ -340,7 +340,10 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             let dist = f(e, "distance", cx) as f64 * cx.px_scale as f64;
             let soft = f(e, "softness", cx) * cx.px_scale * 0.5;
             let mode = crate::blend::Blend::from_index(choice(e, "blend"));
-            let (dx, dy) = (-dir.sin() * dist, dir.cos() * dist);
+            // Inner Shadow is the mirror image: the cut-out copy moves toward the light, so the sliver
+            // lands on the edge facing away from it.
+            let sign = if e.effect == "inner_shadow" { -1.0 } else { 1.0 };
+            let (dx, dy) = (-dir.sin() * dist * sign, dir.cos() * dist * sign);
             let lc = dec([c[0], c[1], c[2]]);
             let shifted = img.transformed(img.w, img.h, &Affine::translate(dx, dy));
             // m = a * (1 - a_shifted): the sliver of the clip that the shifted copy leaves uncovered

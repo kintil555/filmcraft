@@ -690,6 +690,20 @@ fn build_effects() -> Vec<EffectDef> {
                 ch("blend", "Blend Mode", BLEND_MODES, 12),
             ],
         ),
+        // Inner Shadow: Inner Highlight's counterpart, a shaded sliver on the edge facing away from the light.
+        video(
+            "inner_shadow",
+            "Inner Shadow",
+            PERSPECTIVE,
+            vec![
+                col("color", "Shadow Color", [0.0, 0.0, 0.0, 1.0]),
+                f("opacity", "Opacity", 40.0, 0.0, 100.0, "%"),
+                ang("direction", "Light Direction", 45.0),
+                fs("distance", "Edge Thickness", 4.0, (0.0, 4000.0), (0.0, 120.0), "", 1),
+                fs("softness", "Softness", 2.0, (0.0, 1000.0), (0.0, 250.0), "", 1),
+                ch("blend", "Blend Mode", BLEND_MODES, 3),
+            ],
+        ),
         video(
             "bevel_alpha",
             "Bevel Alpha",
