@@ -21,3 +21,4 @@ Disabled ids are kept in preferences (`plugins.disabled`).
 
 New effects are added to FilmCraft itself (`crates/project/src/effect.rs` + `crates/render/src/effects.rs`);
 `inner_highlight` (Blend Mode, Opacity, Softness, Edge Thickness, Light Direction, Color) and `inner_shadow` (same controls, shades the edge facing away from the light; Multiply by default) are built in.
+`outer_glow` (Glow Color, Opacity, Size, Spread, Glow Only) and `glow` (a bloom: Threshold, Radius, Intensity, Glow Color, Blend Mode; Screen by default) are in Effects > Stylize.

@@ -705,6 +705,30 @@ fn build_effects() -> Vec<EffectDef> {
             ],
         ),
         video(
+            "outer_glow",
+            "Outer Glow",
+            STYLIZE,
+            vec![
+                col("color", "Glow Color", [1.0, 0.85, 0.4, 1.0]),
+                f("opacity", "Opacity", 75.0, 0.0, 100.0, "%"),
+                fs("size", "Size", 12.0, (0.0, 1000.0), (0.0, 250.0), "", 1),
+                f("spread", "Spread", 30.0, 0.0, 100.0, "%"),
+                b("only", "Glow Only", false),
+            ],
+        ),
+        video(
+            "glow",
+            "Glow",
+            STYLIZE,
+            vec![
+                f("threshold", "Threshold", 60.0, 0.0, 100.0, "%"),
+                fs("radius", "Radius", 20.0, (0.0, 1000.0), (0.0, 250.0), "", 1),
+                f("intensity", "Intensity", 70.0, 0.0, 100.0, "%"),
+                col("color", "Glow Color", [1.0, 1.0, 1.0, 1.0]),
+                ch("blend", "Blend Mode", BLEND_MODES, 8),
+            ],
+        ),
+        video(
             "bevel_alpha",
             "Bevel Alpha",
             vfx::OBSOLETE,

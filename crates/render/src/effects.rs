@@ -331,6 +331,61 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             }
             *img = sh;
         }
+        "outer_glow" => {
+            let c = color(e, "color", cx);
+            let op = f(e, "opacity", cx) / 100.0;
+            let size = f(e, "size", cx) * cx.px_scale * 0.5;
+            // Spread pushes the blurred alpha toward solid, so the glow stays strong farther out.
+            let gain = 1.0 + f(e, "spread", cx) / 100.0 * 4.0;
+            let only = b(e, "only");
+            let lc = dec([c[0], c[1], c[2]]);
+            let mut g = img.clone();
+            g.px.par_chunks_mut(4).for_each(|p| {
+                p[0] = 0.0;
+                p[1] = 0.0;
+                p[2] = 0.0;
+            });
+            if size > 0.3 {
+                gaussian(&mut g, size, size, false);
+            }
+            g.px.par_chunks_mut(4).for_each(|p| {
+                let a = (p[3] * gain).clamp(0.0, 1.0) * op * c[3];
+                p[0] = lc[0] * a;
+                p[1] = lc[1] * a;
+                p[2] = lc[2] * a;
+                p[3] = a;
+            });
+            if !only {
+                crate::blend::composite(&mut g, img, 1.0, crate::blend::Blend::Normal);
+            }
+            *img = g;
+        }
+        "glow" => {
+            let c = color(e, "color", cx);
+            let th = f(e, "threshold", cx) / 100.0;
+            let rad = f(e, "radius", cx) * cx.px_scale * 0.5;
+            let amount = (f(e, "intensity", cx) / 100.0).clamp(0.0, 1.0);
+            let mode = crate::blend::Blend::from_index(choice(e, "blend"));
+            let tint = dec([c[0], c[1], c[2]]);
+            // Bloom: keep what is brighter than the threshold (soft ramp up to white), blur it, blend it back.
+            let mut g = img.clone();
+            g.px.par_chunks_mut(4).for_each(|p| {
+                if p[3] <= 0.0 {
+                    p.fill(0.0);
+                    return;
+                }
+                let l = linear_to_srgb(luma709(p[0] / p[3], p[1] / p[3], p[2] / p[3]).max(0.0));
+                let k = ((l - th) / (1.0 - th).max(1e-3)).clamp(0.0, 1.0);
+                p[0] *= k * tint[0];
+                p[1] *= k * tint[1];
+                p[2] *= k * tint[2];
+                p[3] *= k;
+            });
+            if rad > 0.3 {
+                gaussian(&mut g, rad, rad, false);
+            }
+            crate::blend::composite(img, &g, amount * c[3], mode);
+        }
         "inner_highlight" | "inner_shadow" => {
             let c = color(e, "color", cx);
             let op = f(e, "opacity", cx) / 100.0;
