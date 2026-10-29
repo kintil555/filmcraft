@@ -36,6 +36,7 @@ pub mod narration;
 pub mod panels;
 pub mod paste_media;
 pub mod perf;
+pub mod plugins;
 pub mod presets;
 pub mod previews;
 pub mod project_manager;
@@ -484,6 +485,8 @@ pub struct Session {
     pub presets: presets::PresetLibrary,
     /// Export presets (built-in + the user's, persisted in the data directory) and favourites.
     pub export_presets: export_tools::ExportPresetLibrary,
+    /// Plugins loaded from `<data dir>/plugins` (preset files for now).
+    pub plugins: plugins::PluginHost,
     /// The export queue (session state, not saved with the project).
     pub export_queue: export_tools::ExportQueue,
     /// Exports run a batch at a time by [`Session::pump_jobs`] (hosts without threads: web).
@@ -587,6 +590,7 @@ impl Session {
             scene_jobs: Vec::new(),
             presets: Default::default(),
             export_presets: Default::default(),
+            plugins: Default::default(),
             export_queue: Default::default(),
             stepped: Vec::new(),
             transcriber: None,
@@ -636,6 +640,8 @@ impl Session {
         self.media.set_use_proxies(self.prefs.media.enable_proxies);
         self.shortcuts.set_dir(&cfg.data_dir);
         self.presets.set_dir(&cfg.data_dir);
+        self.plugins.set_dir(&cfg.data_dir);
+        self.apply_plugins();
         self.export_presets.set_dir(&cfg.data_dir);
         self.prefs_path = Some(prefs_path);
         self.apply_media_cache();

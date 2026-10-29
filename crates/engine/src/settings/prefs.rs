@@ -422,6 +422,8 @@ impl TimelinePrefs {
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginPrefs {
     pub developer_mode: bool,
+    /// Ids of installed plugins that are switched off.
+    pub disabled: Vec<String>,
 }
 
 /// Indeterminate Media Timebase choices → frame rates.

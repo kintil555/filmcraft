@@ -675,6 +675,21 @@ fn build_effects() -> Vec<EffectDef> {
                 b("only", "Shadow Only", false),
             ],
         ),
+        // Fusion-style inner highlight: the sliver of the clip that a copy shifted against the light
+        // direction no longer covers (alpha * (1 - shifted alpha)), blended onto the clip.
+        video(
+            "inner_highlight",
+            "Inner Highlight",
+            PERSPECTIVE,
+            vec![
+                col("color", "Highlight Color", [1.0, 1.0, 1.0, 1.0]),
+                f("opacity", "Opacity", 18.0, 0.0, 100.0, "%"),
+                ang("direction", "Light Direction", 45.0),
+                fs("distance", "Edge Thickness", 4.0, (0.0, 4000.0), (0.0, 120.0), "", 1),
+                fs("softness", "Softness", 0.0, (0.0, 1000.0), (0.0, 250.0), "", 1),
+                ch("blend", "Blend Mode", BLEND_MODES, 12),
+            ],
+        ),
         video(
             "bevel_alpha",
             "Bevel Alpha",

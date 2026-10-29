@@ -725,6 +725,41 @@ fn mb(bytes: u64) -> String {
     if bytes >= 1 << 30 { format!("{:.1} GB", bytes as f64 / (1u64 << 30) as f64) } else { format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64) }
 }
 
+/// Settings ▸ Plugins: the installed plugins (checkbox = enabled) and a Reload button.
+fn plugin_list(app: &mut FilmcraftApp, ui: &mut Ui) {
+    let t = app.tokens;
+    let info = app.session.execute("plugins.list", json!({})).unwrap_or_default();
+    if let Some(dir) = info["dir"].as_str() {
+        note(ui, &t, &format!("Plugin folder: {dir}"));
+    }
+    let list = info["plugins"].as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        note(ui, &t, "No plugins are installed. Put a plugin folder (with a plugin.json) in the plugin folder, then press Reload plugins.");
+    }
+    for p in &list {
+        let id = p["id"].as_str().unwrap_or_default().to_string();
+        let name = p["name"].as_str().unwrap_or(&id).to_string();
+        let version = p["version"].as_str().unwrap_or_default();
+        let mut on = p["enabled"].as_bool().unwrap_or(true);
+        let label = if version.is_empty() { name } else { format!("{name} {version}") };
+        if ui.checkbox(&mut on, label).changed() {
+            let _ = app.session.execute("plugins.setEnabled", json!({"id": id, "enabled": on}));
+        }
+        if let Some(desc) = p["description"].as_str().filter(|d| !d.is_empty()) {
+            note(ui, &t, desc);
+        }
+        if let Some(err) = p["error"].as_str() {
+            note(ui, &t, &format!("Could not load: {err}"));
+        } else {
+            let n = p["presets"].as_u64().unwrap_or(0);
+            note(ui, &t, &format!("{n} effect preset(s) in Effects > Presets"));
+        }
+    }
+    if ui.button("Reload plugins").clicked() {
+        let _ = app.session.execute("plugins.reload", json!({}));
+    }
+}
+
 fn custom(app: &mut FilmcraftApp, ui: &mut Ui, d: &mut SettingsDraft, name: &str) {
     let t = app.tokens;
     match name {
@@ -787,6 +822,7 @@ fn custom(app: &mut FilmcraftApp, ui: &mut Ui, d: &mut SettingsDraft, name: &str
             );
         }
         "appearanceModes" => appearance_modes(app, ui, d),
+        "pluginList" => plugin_list(app, ui),
         "labelPresets" => label_presets(app, ui, d),
         "autoSaveStatus" => {
             let status = app.session.execute("file.autoSaveStatus", json!({})).unwrap_or_default();

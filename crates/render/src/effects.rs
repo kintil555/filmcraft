@@ -331,6 +331,40 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             }
             *img = sh;
         }
+        "inner_highlight" => {
+            let c = color(e, "color", cx);
+            let op = f(e, "opacity", cx) / 100.0;
+            // Light direction uses the Drop Shadow convention (0 = up, clockwise); the cut-out copy
+            // moves away from the light, so the highlight stays on the lit edge.
+            let dir = (f(e, "direction", cx) as f64).to_radians();
+            let dist = f(e, "distance", cx) as f64 * cx.px_scale as f64;
+            let soft = f(e, "softness", cx) * cx.px_scale * 0.5;
+            let mode = crate::blend::Blend::from_index(choice(e, "blend"));
+            let (dx, dy) = (-dir.sin() * dist, dir.cos() * dist);
+            let lc = dec([c[0], c[1], c[2]]);
+            let shifted = img.transformed(img.w, img.h, &Affine::translate(dx, dy));
+            // m = a * (1 - a_shifted): the sliver of the clip that the shifted copy leaves uncovered
+            let mut hl = Image::new(img.w, img.h);
+            hl.px
+                .par_chunks_mut(4)
+                .zip(img.px.par_chunks(4))
+                .zip(shifted.px.par_chunks(4))
+                .for_each(|((h, s), t)| {
+                    h[3] = (s[3] * (1.0 - t[3])).clamp(0.0, 1.0);
+                });
+            if soft > 0.3 {
+                gaussian(&mut hl, soft, soft, false);
+            }
+            // keep the highlight inside the clip, then colour it (premultiplied)
+            hl.px.par_chunks_mut(4).zip(img.px.par_chunks(4)).for_each(|(h, s)| {
+                let m = h[3].min(s[3]);
+                h[0] = lc[0] * m;
+                h[1] = lc[1] * m;
+                h[2] = lc[2] * m;
+                h[3] = m;
+            });
+            crate::blend::composite(img, &hl, op * c[3], mode);
+        }
         "bevel_alpha" => {
             let th = f(e, "thickness", cx) * cx.px_scale;
             let ang = (f(e, "angle", cx) as f64).to_radians();

@@ -92,6 +92,8 @@ struct PresetFile {
 #[derive(Default)]
 pub struct PresetLibrary {
     pub user: Vec<EffectPreset>,
+    /// Presets shipped by enabled plugins (read-only; see `plugins.rs`).
+    pub plugin: Vec<EffectPreset>,
     dir: Option<PathBuf>,
 }
 
@@ -116,11 +118,18 @@ impl PresetLibrary {
     /// Built-in and user presets (user presets shadow built-ins of the same name).
     pub fn all(&self) -> Vec<EffectPreset> {
         let mut v: Vec<EffectPreset> = builtin_presets().into_iter().filter(|b| !self.user.iter().any(|u| u.name == b.name)).collect();
+        let extra: Vec<EffectPreset> = self
+            .plugin
+            .iter()
+            .filter(|p| !v.iter().any(|b| b.name == p.name) && !self.user.iter().any(|u| u.name == p.name))
+            .cloned()
+            .collect();
+        v.extend(extra);
         v.extend(self.user.iter().cloned());
         v
     }
     pub fn find(&self, name: &str) -> Option<EffectPreset> {
-        self.user.iter().find(|p| p.name == name).cloned().or_else(|| builtin_presets().into_iter().find(|p| p.name == name))
+        self.user.iter().find(|p| p.name == name).cloned().or_else(|| self.plugin.iter().find(|p| p.name == name).cloned()).or_else(|| builtin_presets().into_iter().find(|p| p.name == name))
     }
 }
 
@@ -129,7 +138,7 @@ fn file_bytes(presets: &[EffectPreset]) -> Vec<u8> {
     serde_json::to_vec_pretty(&f).unwrap_or_default()
 }
 
-fn parse_file(bytes: &[u8]) -> std::result::Result<Vec<EffectPreset>, String> {
+pub(crate) fn parse_file(bytes: &[u8]) -> std::result::Result<Vec<EffectPreset>, String> {
     let f: PresetFile = serde_json::from_slice(bytes).map_err(|e| format!("not an effect preset file: {e}"))?;
     if f.format != FILE_FORMAT {
         return Err(format!("not an effect preset file (format `{}`)", f.format));
