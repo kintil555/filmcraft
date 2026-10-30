@@ -164,9 +164,11 @@ impl PlaybackRes {
     }
 }
 
-/// Header mode (Import / Edit / Export).
+/// Header mode (Home / Import / Edit / Export).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
+    /// The Home screen: New / Open project and the recent projects (header Home button).
+    Home,
     Import,
     #[default]
     Edit,

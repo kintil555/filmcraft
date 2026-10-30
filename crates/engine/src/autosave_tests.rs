@@ -132,6 +132,15 @@ fn discard_selection_and_unknown_id_preserve_other_candidates() {
 }
 
 #[test]
+fn auto_save_is_off_by_default_but_the_recovery_journal_is_on() {
+    let p = crate::autosave::AutoSavePrefs::default();
+    assert!(!p.enabled, "Auto Save is opt-in");
+    assert!(p.recovery_journal, "crash recovery stays on");
+    let mut s = Session::default();
+    assert_eq!(s.execute("prefs.get", json!({"key": "autoSave.enabled"})).unwrap(), json!(false));
+}
+
+#[test]
 fn preferences_get_set_and_persist() {
     let d = temp_dir("prefs");
     let mut s = Session::default();

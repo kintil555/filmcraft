@@ -54,7 +54,12 @@ impl FilmcraftApp {
             }
             "file.open" => self.pick(FileDialog::OpenProject, |app, paths| {
                 let Some(path) = paths.into_iter().next() else { return Ok(Value::Null) };
-                app.session.execute("file.open", json!({"path": path})).map_err(|e| e.to_string())
+                let r = app.session.execute("file.open", json!({"path": path})).map_err(|e| e.to_string());
+                // opened from the Home screen: carry on in the editor
+                if r.is_ok() && app.ui.mode == crate::state::Mode::Home {
+                    app.ui.mode = crate::state::Mode::Edit;
+                }
+                r
             }),
             "graphics.newFromFile" => {
                 let exts: Vec<&str> = filmcraft_media::STILL_EXTENSIONS.iter().chain(filmcraft_media::VIDEO_EXTENSIONS).copied().collect();

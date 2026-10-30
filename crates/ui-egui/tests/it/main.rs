@@ -24,6 +24,7 @@ mod graphics_handles_ui;
 mod graphics_notice_ui;
 mod graphics_templates_ui;
 mod graphics_ui;
+mod home_ui;
 mod interchange_export_ui;
 mod interface_zoom_ui;
 mod keyboard_ui;

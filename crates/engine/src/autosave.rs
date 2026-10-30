@@ -59,7 +59,7 @@ pub struct AutoSavePrefs {
 impl Default for AutoSavePrefs {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             interval_minutes: 5,
             max_versions: 20,
             save_current_project: false,

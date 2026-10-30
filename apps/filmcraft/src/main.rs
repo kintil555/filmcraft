@@ -5,7 +5,7 @@
 //! unknown option is an error (exit code 2), not a file to open.
 //!
 //! Without a project, `--demo` or `--empty`, Settings ▸ General ▸ At Startup decides: Show Home
-//! (an empty project; there is no Home screen yet), Open Most Recent (an empty project when there
+//! (the Home screen over an empty project), Open Most Recent (an empty project when there
 //! is none), or an empty project. The demo project opens only with `--demo`.
 //!
 //! `--control <port>` (or `FILMCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server;
@@ -223,6 +223,10 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
         // voice-over recording reads the microphone through cpal
         session.voiceover.input = Some(Box::new(audio_in::CpalIn::new(&session.prefs.audio_hardware.device_class)));
         let (project, media) = args::project_and_media(&files);
+        // Settings ▸ General ▸ At Startup ▸ Show Home: land on the Home screen unless the launch
+        // already named something to work on (a project, media, --demo, --empty or --recover).
+        let show_home =
+            project.is_none() && media.is_empty() && !demo && !startup_flag && recover != Some(true) && session.prefs.general.at_startup == "showHome";
         if let Some(p) = project {
             if let Err(e) = session.execute("file.open", json!({"path": p})) {
                 log::error!("{e}");
@@ -251,6 +255,9 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
             }
         }
         let mut app = FilmcraftApp::new(session);
+        if show_home {
+            app.ui.mode = filmcraft_ui_egui::state::Mode::Home;
+        }
         app.set_startup_update_check(true);
         app.graphics_notice = notice;
         if recover == Some(false) {

@@ -117,7 +117,7 @@ like Premiere's:
 
 | Setting | Key | Default |
 |---|---|---|
-| Automatically save projects | `autoSave.enabled` | on |
+| Automatically save projects | `autoSave.enabled` | off |
 | Automatically Save Every N minute(s) | `autoSave.intervalMinutes` | 5 (1–1440) |
 | Maximum Project Versions | `autoSave.maxVersions` | 20 (1–1000) |
 | Auto Save also saves the current project(s) | `autoSave.saveCurrentProject` | off |

@@ -14,6 +14,10 @@ use crate::{Dialog, FilmcraftApp};
 #[derive(Default)]
 pub struct FileDialogState {
     pub recovery_choice: usize,
+    /// Home ▸ New Project: the name being typed (`None` while the field is closed).
+    pub home_new_name: Option<String>,
+    /// Focus the Home name field on its next frame.
+    pub home_new_focus: bool,
 }
 
 fn modal_frame(t: &Tokens) -> Frame {
