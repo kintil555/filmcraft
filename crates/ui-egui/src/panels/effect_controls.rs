@@ -645,8 +645,9 @@ pub(crate) fn param_row(
             if resp.clicked_by(egui::PointerButton::Primary) {
                 actions.push(("playhead.set".into(), json!({"time": tl.0})));
             }
+            let next = param.keyframes.iter().find(|n| n.time > k.time);
             resp.context_menu(|ui| {
-                keyframe_menu(app, ui, KeyframeRef { clip: clip.0, effect: idx, param: pd.id.to_string(), mask, time: k.time }, actions);
+                keyframe_menu(app, ui, KeyframeRef { clip: clip.0, effect: idx, param: pd.id.to_string(), mask, time: k.time }, k, next, actions);
             });
         }
     }
@@ -766,11 +767,28 @@ fn param_value_widget(
 }
 
 /// Shared by the lane diamonds and graph points: commands use media time and preserve the mask.
-fn keyframe_menu(app: &mut FilmcraftApp, ui: &mut egui::Ui, target: KeyframeRef, actions: &mut Vec<(String, Value)>) {
+fn keyframe_menu(
+    app: &mut FilmcraftApp,
+    ui: &mut egui::Ui,
+    target: KeyframeRef,
+    key: &filmcraft_project::Keyframe,
+    next: Option<&filmcraft_project::Keyframe>,
+    actions: &mut Vec<(String, Value)>,
+) {
     let mut params = json!({"clip": target.clip, "effect": target.effect, "param": target.param, "mediaTime": target.time.0});
     if let Some(mask) = target.mask {
         params["mask"] = json!(mask);
     }
+    // Simple curve editor for the segment leaving this keyframe (needs a following keyframe)
+    let easing = ui.add_enabled(next.is_some(), egui::Button::new(tl!("Easing Editor…")));
+    app.auto.add("effectControls.keyframeMenu.easing", easing.rect, "Easing Editor…");
+    if easing.clicked()
+        && let Some(n) = next
+    {
+        app.ui.easing = Some(crate::panels::easing_editor::draft_for(target.clone(), key, n));
+        ui.close();
+    }
+    ui.separator();
     ui.label(egui::RichText::new(tl!("Temporal Interpolation")).color(app.tokens.text_dim));
     for (label, key) in [
         (tl!("Linear"), "linear"),
@@ -1309,7 +1327,7 @@ fn draw_graph_keyframes(
             let r = Rect::from_center_size(c, vec2(10.0, 10.0));
             let resp = ui.interact(r.expand(2.0), id, Sense::click_and_drag());
             resp.context_menu(|ui| {
-                keyframe_menu(app, ui, KeyframeRef { clip: clip.0, effect: idx, param: pd.id.to_string(), mask, time: k.time }, actions);
+                keyframe_menu(app, ui, KeyframeRef { clip: clip.0, effect: idx, param: pd.id.to_string(), mask, time: k.time }, k, ks.get(i + 1), actions);
             });
             let auto_id = match (comps.len(), ci) {
                 (1, _) => format!("effectControls.{}.graph.keyframe.{}", pd.id, k.time.0),
