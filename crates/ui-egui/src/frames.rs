@@ -163,6 +163,10 @@ struct Shared {
     /// started, and the workers can finish at most `workers / cost` of them per second.
     render_cost: Mutex<f64>,
     workers: usize,
+    /// Background (thumbnail) jobs now running. At most `workers - 1` run at once, so a worker is
+    /// always free for the monitors: a click on the Timeline ruler must not wait behind thumbnails
+    /// that cannot be preempted.
+    background_running: std::sync::atomic::AtomicUsize,
     /// Always-on counters for `perf.stats`.
     stats: Mutex<FrameStats>,
     /// Set (under the queue lock) when the [`FrameServer`] is dropped: the workers return.
@@ -486,6 +490,7 @@ impl FrameServer {
             records: Mutex::new(Vec::new()),
             render_cost: Mutex::new(0.0),
             workers: workers.max(1),
+            background_running: std::sync::atomic::AtomicUsize::new(0),
             stats: Mutex::new(FrameStats::default()),
             stop: AtomicBool::new(false),
         });
@@ -877,9 +882,14 @@ fn worker(
                     return;
                 }
                 if !q.is_empty() {
+                    // thumbnails may use all workers but one (a single worker runs everything)
+                    let bg_full = sh.workers > 1 && sh.background_running.load(Ordering::Relaxed) >= sh.workers - 1;
                     // highest priority (lowest number) first; FIFO among equals
-                    let best = q.iter().enumerate().min_by_key(|(i, j)| (j.prio, *i)).map(|(i, _)| i).unwrap_or(0);
-                    if let Some(job) = q.remove(best) {
+                    let best = q.iter().enumerate().filter(|(_, j)| !(bg_full && is_background(j))).min_by_key(|(i, j)| (j.prio, *i)).map(|(i, _)| i);
+                    if let Some(job) = best.and_then(|i| q.remove(i)) {
+                        if is_background(&job) {
+                            sh.background_running.fetch_add(1, Ordering::Relaxed);
+                        }
                         break job;
                     }
                 }
@@ -889,7 +899,18 @@ fn worker(
         // A panic while decoding or rendering one frame (bad media, a decoder bug) must not take
         // the worker down with it: a dead worker leaves its frame "in flight" forever and the
         // monitors blank. Log it, forget the job and keep serving.
+        let background = is_background(&job);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_job(&sh, &job, &pool, &services, &previews)));
+        if background {
+            // under the queue lock, so a worker that just found the limit reached cannot miss this
+            let q = sh.queue.lock().unwrap_or_else(PoisonError::into_inner);
+            sh.background_running.fetch_sub(1, Ordering::Relaxed);
+            let waiting = !q.is_empty();
+            drop(q);
+            if waiting {
+                sh.cv.notify_one();
+            }
+        }
         if ran.is_err() {
             sh.in_flight.lock().unwrap_or_else(PoisonError::into_inner).retain(|(k, c, _)| !(*k == job.key && Arc::ptr_eq(c, &job.cancel)));
             sh.stats.lock().unwrap_or_else(PoisonError::into_inner).failed += 1;
