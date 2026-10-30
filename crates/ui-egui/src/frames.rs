@@ -386,26 +386,56 @@ impl PlanCache {
 struct Cache {
     map: HashMap<FrameKey, (Arc<Rgba>, u64)>,
     bytes: usize,
+    /// Bytes of the small item pictures (thumbnails) within `bytes`.
+    thumb_bytes: usize,
     budget: usize,
     clock: u64,
 }
 
+/// A thumbnail: a small picture of one item. Scrubbing fills the cache with big monitor frames;
+/// evicting the thumbnails first would redecode every tile of the Timeline afterwards.
+fn is_thumb(k: &FrameKey, len: usize) -> bool {
+    matches!(k.target, Target::Item(_)) && len <= 512 << 10
+}
+
 impl Cache {
+    /// Thumbnails are kept until they alone use this share of the budget (one eighth).
+    fn thumb_budget(&self) -> usize {
+        self.budget / 8
+    }
+
     fn insert(&mut self, k: FrameKey, v: Arc<Rgba>) {
         self.clock += 1;
-        self.bytes += v.px.len();
+        let len = v.px.len();
+        self.bytes += len;
+        self.thumb_bytes += if is_thumb(&k, len) { len } else { 0 };
         if let Some((old, _)) = self.map.insert(k, (v, self.clock)) {
             self.bytes -= old.px.len();
+            if is_thumb(&k, old.px.len()) {
+                self.thumb_bytes -= old.px.len();
+            }
         }
         if self.bytes > self.budget {
             let mut all: Vec<(u64, FrameKey, usize)> = self.map.iter().map(|(k, (v, s))| (*s, *k, v.px.len())).collect();
             all.sort_unstable_by_key(|x| x.0);
-            for (_, k, b) in all {
-                if self.bytes <= self.budget * 8 / 10 {
-                    break;
+            let goal = self.budget * 8 / 10;
+            // least recently used first, sparing thumbnails while they fit their own share
+            for pass in 0..2 {
+                for (_, k, b) in &all {
+                    if self.bytes <= goal {
+                        break;
+                    }
+                    let thumb = is_thumb(k, *b);
+                    if pass == 0 && thumb && self.thumb_bytes <= self.thumb_budget() {
+                        continue;
+                    }
+                    if self.map.remove(k).is_some() {
+                        self.bytes -= b;
+                        if thumb {
+                            self.thumb_bytes -= b;
+                        }
+                    }
                 }
-                self.map.remove(&k);
-                self.bytes -= b;
             }
         }
     }
@@ -483,7 +513,7 @@ impl FrameServer {
         let shared = Arc::new(Shared {
             queue: Mutex::new(VecDeque::new()),
             cv: Condvar::new(),
-            done: Mutex::new(Cache { map: HashMap::new(), bytes: 0, budget: 768 << 20, clock: 0 }),
+            done: Mutex::new(Cache { map: HashMap::new(), bytes: 0, thumb_bytes: 0, budget: 768 << 20, clock: 0 }),
             plans: Mutex::new(PlanCache::default()),
             in_flight: Mutex::new(Vec::new()),
             profiling: AtomicBool::new(false),

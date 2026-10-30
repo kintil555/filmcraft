@@ -110,6 +110,20 @@ fn is_ease(interp: &str) -> bool {
     !matches!(interp, "linear" | "hold")
 }
 
+/// Dragging a handle of a segment that is not eased (linear): it becomes a bezier, and the other
+/// handle starts where it was drawn (a third), not at a stale influence kept from an older edit.
+fn leave_flat(d: &mut EasingDraft, dragged: usize) {
+    if is_ease(&d.interp) {
+        return;
+    }
+    d.interp = "bezier".into();
+    if dragged == 0 {
+        d.in_influence = 1.0 / 3.0;
+    } else {
+        d.out_influence = 1.0 / 3.0;
+    }
+}
+
 /// Send the draft to the project: the interpolation on the start keyframe, its outgoing influence,
 /// and the incoming influence on the end keyframe.
 fn apply(app: &mut FilmcraftApp, d: &EasingDraft) {
@@ -252,9 +266,7 @@ fn simple_page(app: &mut FilmcraftApp, ui: &mut egui::Ui, d: &mut EasingDraft) {
             } else {
                 d.in_influence = (1.0 - fx).clamp(MIN_INFLUENCE, 1.0);
             }
-            if !ease {
-                d.interp = "bezier".into();
-            }
+            leave_flat(d, n);
         }
         released |= resp.drag_stopped();
         let dim = if ease { Color32::WHITE } else { t.text_faint };
@@ -342,6 +354,16 @@ mod tests {
         }
         assert!(!PRESETS.iter().any(|p| is_preset(&draft("bezier", 0.2, 0.8), p)));
         assert!(!is_preset(&draft("hold", 0.3, 0.3), &PRESETS[0]));
+    }
+
+    #[test]
+    fn dragging_a_linear_handle_keeps_the_other_one_where_it_was_drawn() {
+        let mut d = draft("linear", 0.9, 0.8);
+        leave_flat(&mut d, 0);
+        assert_eq!((d.interp.as_str(), d.in_influence), ("bezier", 1.0 / 3.0));
+        let mut d = draft("bezier", 0.9, 0.8);
+        leave_flat(&mut d, 0);
+        assert_eq!(d.in_influence, 0.8);
     }
 
     #[test]
