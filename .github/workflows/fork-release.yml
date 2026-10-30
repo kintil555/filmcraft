@@ -28,6 +28,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The launcher only installs releases named like `filmcraft-<ver>-windows-x64-portable.zip`
+      # (tag v<ver>), and checks that filmcraft.exe's embedded version equals <ver>. So every
+      # build gets <major>.<minor>.<run number> stamped into the workspace version.
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          BASE="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          V="${BASE%.*}.${GITHUB_RUN_NUMBER}"
+          perl -0pi -e "s/^version = \".*?\"/version = \"$V\"/m" Cargo.toml
+          cargo update --workspace
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+
       # Debug symbols for plugin authors: MSVC writes them to target/release/filmcraft.pdb,
       # outside the exe, so the exe stays the same size. Only this workflow sets it.
       - name: Build
@@ -41,20 +54,24 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          $zip = "filmcraft-${{ steps.ver.outputs.v }}-windows-x64-portable.zip"
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item target/release/filmcraft.exe dist/
           Copy-Item docs/plugins.md dist/
-          Compress-Archive -Path dist/* -DestinationPath FilmCraft-win-x64.zip
+          Compress-Archive -Path dist/* -DestinationPath $zip
 
       - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="build-${{ github.run_number }}"
+          V="${{ steps.ver.outputs.v }}"
           short="${GITHUB_SHA::8}"
-          gh release create "$tag" FilmCraft-win-x64.zip target/release/filmcraft.exe target/release/filmcraft.pdb \
+          cp target/release/filmcraft.pdb "filmcraft-$V-windows-x64.pdb"
+          cp target/release/filmcraft.exe "filmcraft-$V-windows-x64.exe"
+          sha256sum "filmcraft-$V-windows-x64-portable.zip" > SHA256SUMS.txt
+          gh release create "v$V" "filmcraft-$V-windows-x64-portable.zip" "filmcraft-$V-windows-x64.exe" "filmcraft-$V-windows-x64.pdb" SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title "FilmCraft (plugins) build ${{ github.run_number }}" \
-            --notes "Automatic build of ${short}: plugin host, Inner Highlight, Inner Shadow, Outer Glow, Glow. Unsigned. filmcraft.pdb holds the debug symbols for plugin development (it matches this exact exe)." \
+            --title "FilmCraft (plugins) $V" \
+            --notes "Automatic build of ${short}: plugin host, Inner Highlight, Inner Shadow, Outer Glow, Glow. Unsigned. The .pdb holds the debug symbols for plugin development (it matches the .exe of this release)." \
             --latest
