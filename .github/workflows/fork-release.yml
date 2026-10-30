@@ -28,8 +28,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Debug symbols for plugin authors: MSVC writes them to target/release/filmcraft.pdb,
+      # outside the exe, so the exe stays the same size. Only this workflow sets it.
       - name: Build
-        run: cargo build --release -p filmcraft
+        shell: pwsh
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+        run: |
+          cargo build --release -p filmcraft
+          if (-not (Test-Path target/release/filmcraft.pdb)) { throw "filmcraft.pdb was not produced" }
 
       - name: Package
         shell: pwsh
@@ -46,8 +53,8 @@ jobs:
         run: |
           tag="build-${{ github.run_number }}"
           short="${GITHUB_SHA::8}"
-          gh release create "$tag" FilmCraft-win-x64.zip target/release/filmcraft.exe \
+          gh release create "$tag" FilmCraft-win-x64.zip target/release/filmcraft.exe target/release/filmcraft.pdb \
             --target "$GITHUB_SHA" \
             --title "FilmCraft (plugins) build ${{ github.run_number }}" \
-            --notes "Automatic build of ${short}: plugin host, Inner Highlight, Inner Shadow, Outer Glow, Glow. Unsigned." \
+            --notes "Automatic build of ${short}: plugin host, Inner Highlight, Inner Shadow, Outer Glow, Glow. Unsigned. filmcraft.pdb holds the debug symbols for plugin development (it matches this exact exe)." \
             --latest
