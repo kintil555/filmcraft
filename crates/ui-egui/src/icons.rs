@@ -233,6 +233,31 @@ impl Pen16<'_> {
     }
 }
 
+/// Points on a circle's arc (degrees, screen coordinates: y grows downwards), both ends included.
+fn arc_pts(cx: f32, cy: f32, r: f32, a0: f32, a1: f32, n: usize) -> Vec<(f32, f32)> {
+    (0..=n)
+        .map(|i| {
+            let a = (a0 + (a1 - a0) * i as f32 / n as f32).to_radians();
+            (cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect()
+}
+
+/// Maps points drawn along a tool's own axis (`u` along it, `v` across) onto the grid: `u` runs
+/// up and to the right at 45 degrees from `origin`.
+fn along_diagonal(origin: (f32, f32), pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let k = std::f32::consts::FRAC_1_SQRT_2;
+    pts.iter().map(|(u, v)| (origin.0 + (u + v) * k, origin.1 + (v - u) * k)).collect()
+}
+
+/// A capsule (two half circles joined by straight sides) centred on `c`, its long axis running up
+/// and to the right: one link of a chain.
+fn capsule(c: (f32, f32), half: f32, r: f32) -> Vec<(f32, f32)> {
+    let mut pts: Vec<(f32, f32)> = arc_pts(-half, 0.0, r, 90.0, 270.0, 10);
+    pts.extend(arc_pts(half, 0.0, r, -90.0, 90.0, 10));
+    along_diagonal(c, &pts)
+}
+
 /// Paint `icon` centred in `rect`.
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let pen = Pen16 { painter, rect, color, width: 1.25 };
@@ -420,8 +445,16 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(1.8, 5.5), (5.2, 5.5), (3.2, 8.5)]);
         }
         Wrench => {
-            pen.line(&[(3.0, 13.0), (9.0, 7.0)]);
-            pen.arc(10.5, 5.5, 3.0, 110.0, 400.0);
+            // An open-end spanner running up and to the right: handle, round head, jaw notch.
+            let (hc, hr, hw) = (10.5_f32, 3.4_f32, 1.1_f32);
+            let edge = (hr * hr - hw * hw).sqrt();
+            let a = hw.atan2(edge).to_degrees();
+            let mut pts = vec![(0.0, -hw)];
+            pts.extend(arc_pts(hc, 0.0, hr, -180.0 + a, -a, 12));
+            pts.extend([(hc, -hw), (hc, hw)]);
+            pts.extend(arc_pts(hc, 0.0, hr, a, 180.0 - a, 12));
+            pts.push((0.0, hw));
+            pen.closed(&along_diagonal((2.6, 13.4), &pts));
         }
         Plus => {
             pen.line(&[(8.0, 3.0), (8.0, 13.0)]);
@@ -538,15 +571,21 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         ChevronDown => pen.line(&[(4.0, 6.0), (8.0, 10.0), (12.0, 6.0)]),
         ChevronRight => pen.line(&[(6.0, 4.0), (10.0, 8.0), (6.0, 12.0)]),
         Magnet => {
-            pen.arc(8.0, 8.0, 4.5, 0.0, 180.0);
-            pen.line(&[(3.5, 8.0), (3.5, 2.5)]);
-            pen.line(&[(12.5, 8.0), (12.5, 2.5)]);
-            pen.rect_fill(2.5, 2.5, 4.8, 4.8);
-            pen.rect_fill(11.2, 2.5, 13.5, 4.8);
+            // A horseshoe: outer and inner half circles joined by two legs, with a line across
+            // each leg where the pole tip starts.
+            let mut pts = vec![(3.0, 2.5)];
+            pts.extend(arc_pts(8.0, 8.5, 5.0, 180.0, 0.0, 16));
+            pts.extend([(13.0, 2.5), (10.0, 2.5)]);
+            pts.extend(arc_pts(8.0, 8.5, 2.0, 0.0, 180.0, 10));
+            pts.push((6.0, 2.5));
+            pen.closed(&pts);
+            pen.line(&[(3.0, 5.2), (6.0, 5.2)]);
+            pen.line(&[(10.0, 5.2), (13.0, 5.2)]);
         }
         Link => {
-            pen.closed(&[(2.0, 6.0), (8.0, 6.0), (8.0, 10.0), (2.0, 10.0)]);
-            pen.closed(&[(8.0, 6.0), (14.0, 6.0), (14.0, 10.0), (8.0, 10.0)]);
+            // Two chain links, end to end and overlapping.
+            pen.closed(&capsule((5.6, 10.4), 1.6, 2.3));
+            pen.closed(&capsule((10.4, 5.6), 1.6, 2.3));
         }
         Keyframe => pen.fill(&[(8.0, 3.0), (13.0, 8.0), (8.0, 13.0), (3.0, 8.0)]),
         Stopwatch => {
@@ -703,10 +742,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Automate => {
-            pen.rect_fill(1.5, 5.0, 4.5, 11.0);
-            pen.rect_fill(5.5, 5.0, 8.5, 11.0);
-            pen.rect_fill(9.5, 5.0, 12.0, 11.0);
-            pen.line(&[(13.5, 5.0), (13.5, 11.0)]);
+            // Clips laid end to end on two tracks (wide bars read as clips, not as a barcode).
+            pen.rect_fill(2.0, 3.5, 7.0, 7.0);
+            pen.rect_fill(8.5, 3.5, 14.0, 7.0);
+            pen.rect_fill(2.0, 9.0, 9.5, 12.5);
+            pen.rect_fill(11.0, 9.0, 14.0, 12.5);
         }
         Star => {
             let pts: Vec<(f32, f32)> = (0..10)
@@ -752,15 +792,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Moon => {
-            // The outer circle's arc through the bottom left, back along a smaller circle that
-            // bites the top right out of it.
-            let arc = |cx: f32, cy: f32, r: f32, a0: f32, a1: f32| {
-                (0..=12).map(move |i| {
-                    let a = (a0 + (a1 - a0) * i as f32 / 12.0).to_radians();
-                    (cx + r * a.cos(), cy + r * a.sin())
-                })
-            };
-            let pts: Vec<(f32, f32)> = arc(8.0, 8.5, 5.5, 8.56, 261.44).chain(arc(11.2, 5.3, 4.6, 209.12, 60.88).skip(1)).collect();
+            // A crescent: a big circle with a smaller one bitten out of its top right, both
+            // drawn with enough points to look round at any size.
+            let mut pts = arc_pts(8.0, 8.0, 6.0, 0.0, 270.0, 40);
+            pts.extend(arc_pts(11.0, 5.0, 4.243, 225.0, 45.0, 24).into_iter().skip(1));
             pen.closed(&pts);
         }
         Eyedropper => {
