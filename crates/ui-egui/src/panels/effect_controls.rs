@@ -819,7 +819,14 @@ fn keyframe_menu(
     let response = ui.button(tl!("Clear"));
     app.auto.add("effectControls.keyframeMenu.clear", response.rect, "Clear");
     if response.clicked() {
-        actions.push(("effects.deleteKeyframe".into(), params));
+        let targets = if app.ui.keyframe_selection.contains(&target) { app.ui.keyframe_selection.clone() } else { vec![target.clone()] };
+        for t in targets {
+            let mut p = json!({"clip": t.clip, "effect": t.effect, "param": t.param, "mediaTime": t.time.0});
+            if let Some(mask) = t.mask {
+                p["mask"] = json!(mask);
+            }
+            actions.push(("effects.deleteKeyframe".into(), p));
+        }
         ui.close();
     }
 }
