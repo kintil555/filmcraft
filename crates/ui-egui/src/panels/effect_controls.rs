@@ -775,10 +775,6 @@ fn keyframe_menu(
     next: Option<&filmcraft_project::Keyframe>,
     actions: &mut Vec<(String, Value)>,
 ) {
-    let mut params = json!({"clip": target.clip, "effect": target.effect, "param": target.param, "mediaTime": target.time.0});
-    if let Some(mask) = target.mask {
-        params["mask"] = json!(mask);
-    }
     // Simple curve editor for the segment leaving this keyframe (needs a following keyframe)
     let easing = ui.add_enabled(next.is_some(), egui::Button::new(tl!("Easing Editor…")));
     app.auto.add("effectControls.keyframeMenu.easing", easing.rect, "Easing Editor…");
