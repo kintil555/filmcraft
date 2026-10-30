@@ -231,6 +231,72 @@ impl Pen16<'_> {
             .collect();
         self.line(&pts);
     }
+    /// Like `line`, with round caps and joins (a dot as wide as the stroke at every vertex).
+    fn rline(&self, pts: &[(f32, f32)]) {
+        let v = self.crisp(pts, false);
+        self.painter.add(PathShape::line(v.clone(), self.stroke()));
+        let r = self.stroke_w() * 0.5;
+        for q in v {
+            self.painter.circle_filled(q, r, self.color);
+        }
+    }
+    /// Like `closed`, with round joins.
+    fn rclosed(&self, pts: &[(f32, f32)]) {
+        let v = self.crisp(pts, true);
+        self.painter.add(PathShape::closed_line(v.clone(), self.stroke()));
+        let r = self.stroke_w() * 0.5;
+        for q in v {
+            self.painter.circle_filled(q, r, self.color);
+        }
+    }
+    /// A smooth curve through `pts` (Catmull-Rom), round capped when open.
+    fn curve(&self, pts: &[(f32, f32)], closed: bool) {
+        let s = smooth(pts, closed);
+        if closed {
+            self.closed(&s);
+        } else {
+            self.line(&s);
+            let r = self.stroke_w() * 0.5;
+            for q in [s.first(), s.last()].into_iter().flatten() {
+                self.painter.circle_filled(self.p(q.0, q.1), r, self.color);
+            }
+        }
+    }
+    /// A filled bar with fully round ends (a finger).
+    fn pill(&self, x0: f32, y0: f32, x1: f32, y1: f32) {
+        let rc = Rect::from_min_max(self.p(x0, y0), self.p(x1, y1));
+        self.painter.rect_filled(rc, ((x1 - x0).min(y1 - y0)) * 0.5 * self.s(), self.color);
+    }
+}
+
+/// Catmull-Rom spline through `pts`, flattened to line segments (fewer than three points: as is).
+fn smooth(pts: &[(f32, f32)], closed: bool) -> Vec<(f32, f32)> {
+    let n = pts.len();
+    if n < 3 {
+        return pts.to_vec();
+    }
+    let last = n as isize - 1;
+    let at = |i: isize| -> (f32, f32) {
+        let k = if closed { i.rem_euclid(n as isize) } else { i.clamp(0, last) };
+        pts.get(k as usize).copied().unwrap_or((0.0, 0.0))
+    };
+    let segs = if closed { n } else { n - 1 };
+    let mut out = Vec::with_capacity(segs * 8 + 1);
+    for i in 0..segs as isize {
+        let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
+        for k in 0..8 {
+            let t = k as f32 / 8.0;
+            let (t2, t3) = (t * t, t * t * t);
+            let f = |a: f32, b: f32, c: f32, d: f32| {
+                0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3)
+            };
+            out.push((f(p0.0, p1.0, p2.0, p3.0), f(p0.1, p1.1, p2.1, p3.1)));
+        }
+    }
+    if !closed {
+        out.push(at(last));
+    }
+    out
 }
 
 /// Points on a circle's arc (degrees, screen coordinates: y grows downwards), both ends included.
@@ -263,11 +329,17 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let pen = Pen16 { painter, rect, color, width: 1.25 };
     use Icon::*;
     match icon {
-        Selection => pen.fill(&[(4.0, 2.0), (4.0, 13.0), (6.8, 10.4), (8.8, 14.6), (10.4, 13.9), (8.5, 9.8), (12.2, 9.6)]),
+        Selection => {
+            let a = [(4.6, 3.2), (4.6, 12.0), (6.9, 9.9), (8.9, 13.8), (10.1, 13.2), (8.2, 9.3), (11.4, 9.1)];
+            pen.fill(&a);
+            pen.rclosed(&a);
+        }
         TrackSelectFwd => {
-            pen.fill(&[(2.0, 3.0), (2.0, 11.0), (4.0, 9.2), (5.4, 12.2), (6.6, 11.6), (5.3, 8.7), (7.8, 8.5)]);
-            pen.fill(&[(8.5, 4.5), (11.0, 7.0), (8.5, 9.5)]);
-            pen.fill(&[(11.5, 4.5), (14.0, 7.0), (11.5, 9.5)]);
+            let a = [(2.8, 3.6), (2.8, 11.2), (4.7, 9.5), (6.0, 12.4), (7.0, 11.9), (5.8, 9.1), (8.2, 8.9)];
+            pen.fill(&a);
+            pen.rclosed(&a);
+            pen.rline(&[(9.6, 4.8), (11.6, 7.0), (9.6, 9.2)]);
+            pen.rline(&[(12.2, 4.8), (14.2, 7.0), (12.2, 9.2)]);
         }
         TrackSelectBack => {
             pen.fill(&[(14.0, 3.0), (14.0, 11.0), (12.0, 9.2), (10.6, 12.2), (9.4, 11.6), (10.7, 8.7), (8.2, 8.5)]);
@@ -275,9 +347,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(4.5, 4.5), (2.0, 7.0), (4.5, 9.5)]);
         }
         Ripple => {
-            pen.line(&[(9.0, 2.5), (6.5, 2.5), (6.5, 13.5), (9.0, 13.5)]);
-            pen.fill(&[(10.0, 5.0), (13.5, 8.0), (10.0, 11.0)]);
-            pen.line(&[(2.0, 8.0), (6.5, 8.0)]);
+            pen.rline(&[(12.0, 3.0), (9.5, 3.0), (9.5, 13.0), (12.0, 13.0)]);
+            pen.rline(&[(9.5, 8.0), (3.0, 8.0)]);
+            pen.rline(&[(5.4, 5.7), (3.0, 8.0), (5.4, 10.3)]);
         }
         Rolling => {
             pen.line(&[(6.0, 2.5), (8.0, 2.5), (8.0, 13.5), (6.0, 13.5)]);
@@ -307,18 +379,18 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(3.5, 13.5), (5.5, 12.0), (5.5, 14.8)]);
         }
         Razor => {
-            pen.closed(&[(2.5, 5.0), (13.5, 5.0), (13.5, 11.0), (2.5, 11.0)]);
-            pen.circle(8.0, 8.0, 1.3);
-            pen.line(&[(5.0, 8.0), (6.5, 8.0)]);
-            pen.line(&[(9.5, 8.0), (11.0, 8.0)]);
+            let blade = along_diagonal((8.0, 8.0), &[(-5.4, -2.3), (5.4, -2.3), (5.4, 2.3), (-5.4, 2.3)]);
+            pen.rclosed(&blade);
+            for u in [-2.6_f32, 0.0, 2.6] {
+                pen.rline(&along_diagonal((8.0, 8.0), &[(u, -2.3), (u, -0.5)]));
+            }
         }
         Slip => {
-            pen.line(&[(2.5, 4.0), (2.5, 12.0)]);
-            pen.line(&[(13.5, 4.0), (13.5, 12.0)]);
-            pen.fill(&[(4.5, 8.0), (7.0, 6.0), (7.0, 10.0)]);
-            pen.fill(&[(11.5, 8.0), (9.0, 6.0), (9.0, 10.0)]);
-            pen.line(&[(5.5, 3.0), (10.5, 3.0)]);
-            pen.line(&[(5.5, 13.0), (10.5, 13.0)]);
+            pen.rline(&[(2.5, 3.5), (2.5, 12.5)]);
+            pen.rline(&[(13.5, 3.5), (13.5, 12.5)]);
+            pen.rline(&[(5.2, 8.0), (10.8, 8.0)]);
+            pen.rline(&[(7.2, 5.8), (5.0, 8.0), (7.2, 10.2)]);
+            pen.rline(&[(8.8, 5.8), (11.0, 8.0), (8.8, 10.2)]);
         }
         Slide => {
             pen.line(&[(5.5, 3.0), (5.5, 13.0)]);
@@ -327,17 +399,24 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(14.5, 8.0), (12.0, 6.0), (12.0, 10.0)]);
         }
         Pen => {
-            pen.closed(&[(8.0, 2.0), (12.0, 9.0), (9.5, 13.5), (6.5, 13.5), (4.0, 9.0)]);
-            pen.line(&[(8.0, 2.0), (8.0, 8.0)]);
-            pen.dot(8.0, 9.0, 1.0);
+            pen.rclosed(&[(6.4, 2.4), (9.6, 2.4), (11.4, 7.2), (8.0, 13.8), (4.6, 7.2)]);
+            pen.circle(8.0, 7.6, 1.1);
+            pen.rline(&[(8.0, 8.7), (8.0, 12.6)]);
         }
         Rectangle => pen.rect(2.5, 4.0, 13.5, 12.0),
         Ellipse => pen.circle(8.0, 8.0, 5.5),
         Hand => {
-            pen.line(&[(5.0, 8.5), (5.0, 4.0), (6.5, 3.2), (7.3, 4.0), (7.3, 7.5)]);
-            pen.line(&[(7.3, 4.0), (7.3, 2.8), (8.8, 2.2), (9.6, 3.0), (9.6, 7.5)]);
-            pen.line(&[(9.6, 3.6), (11.0, 3.2), (11.9, 4.0), (11.9, 8.0)]);
-            pen.line(&[(11.9, 5.5), (13.0, 5.3), (13.6, 6.0), (13.6, 10.0), (11.5, 14.0), (6.5, 14.0), (3.0, 10.0), (2.5, 8.5), (3.5, 7.8), (5.0, 8.5)]);
+            // a filled glove: four round-ended fingers, a rounded palm and a thumb
+            pen.pill(4.6, 3.8, 6.3, 9.5);
+            pen.pill(6.5, 2.4, 8.2, 9.5);
+            pen.pill(8.4, 2.8, 10.1, 9.5);
+            pen.pill(10.3, 4.4, 12.0, 9.5);
+            pen.painter.rect_filled(
+                Rect::from_min_max(pen.p(4.6, 7.0), pen.p(12.0, 13.8)),
+                3.0 * pen.s(),
+                color,
+            );
+            pen.fill(&capsule((12.4, 9.6), 2.0, 0.9));
         }
         Zoom => {
             pen.circle(6.8, 6.8, 4.3);
@@ -346,9 +425,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(6.8, 4.8), (6.8, 8.8)]);
         }
         Type => {
-            pen.line(&[(3.0, 4.5), (3.0, 2.8), (13.0, 2.8), (13.0, 4.5)]);
-            pen.line(&[(8.0, 2.8), (8.0, 13.5)]);
-            pen.line(&[(6.0, 13.5), (10.0, 13.5)]);
+            pen.rline(&[(3.5, 5.3), (3.5, 3.2), (12.5, 3.2), (12.5, 5.3)]);
+            pen.rline(&[(8.0, 3.2), (8.0, 12.8)]);
+            pen.rline(&[(5.8, 12.8), (10.2, 12.8)]);
         }
         Play => pen.fill(&[(4.5, 2.8), (13.0, 8.0), (4.5, 13.2)]),
         Pause => {
@@ -364,55 +443,15 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(3.5, 3.5), (10.0, 8.0), (3.5, 12.5)]);
         }
         GoToIn => {
-            pen.line(&[(5.0, 3.0), (4.0, 3.0), (3.5, 3.5), (3.5, 6.0), (3.0, 7.0), (2.0, 8.0), (3.0, 9.0), (3.5, 10.0), (3.5, 12.5), (4.0, 13.0), (5.0, 13.0)]);
+            pen.curve(&[(5.0, 3.0), (3.8, 3.2), (3.3, 4.2), (3.3, 6.2), (2.8, 7.4), (2.0, 8.0), (2.8, 8.6), (3.3, 9.8), (3.3, 11.8), (3.8, 12.8), (5.0, 13.0)], false);
             pen.fill(&[(13.0, 3.5), (6.0, 8.0), (13.0, 12.5)]);
         }
         GoToOut => {
-            pen.line(&[
-                (11.0, 3.0),
-                (12.0, 3.0),
-                (12.5, 3.5),
-                (12.5, 6.0),
-                (13.0, 7.0),
-                (14.0, 8.0),
-                (13.0, 9.0),
-                (12.5, 10.0),
-                (12.5, 12.5),
-                (12.0, 13.0),
-                (11.0, 13.0),
-            ]);
+            pen.curve(&[(11.0, 3.0), (12.2, 3.2), (12.7, 4.2), (12.7, 6.2), (13.2, 7.4), (14.0, 8.0), (13.2, 8.6), (12.7, 9.8), (12.7, 11.8), (12.2, 12.8), (11.0, 13.0)], false);
             pen.fill(&[(3.0, 3.5), (10.0, 8.0), (3.0, 12.5)]);
         }
-        MarkIn => pen.line(&[
-            (10.5, 2.5),
-            (8.5, 2.5),
-            (7.5, 3.0),
-            (7.0, 4.0),
-            (7.0, 6.0),
-            (6.5, 7.0),
-            (5.0, 8.0),
-            (6.5, 9.0),
-            (7.0, 10.0),
-            (7.0, 12.0),
-            (7.5, 13.0),
-            (8.5, 13.5),
-            (10.5, 13.5),
-        ]),
-        MarkOut => pen.line(&[
-            (5.5, 2.5),
-            (7.5, 2.5),
-            (8.5, 3.0),
-            (9.0, 4.0),
-            (9.0, 6.0),
-            (9.5, 7.0),
-            (11.0, 8.0),
-            (9.5, 9.0),
-            (9.0, 10.0),
-            (9.0, 12.0),
-            (8.5, 13.0),
-            (7.5, 13.5),
-            (5.5, 13.5),
-        ]),
+        MarkIn => pen.curve(&[(10.5, 2.5), (8.2, 2.8), (7.0, 4.5), (7.0, 6.6), (6.2, 7.6), (5.0, 8.0), (6.2, 8.4), (7.0, 9.4), (7.0, 11.5), (8.2, 13.2), (10.5, 13.5)], false),
+        MarkOut => pen.curve(&[(5.5, 2.5), (7.8, 2.8), (9.0, 4.5), (9.0, 6.6), (9.8, 7.6), (11.0, 8.0), (9.8, 8.4), (9.0, 9.4), (9.0, 11.5), (7.8, 13.2), (5.5, 13.5)], false),
         Marker => pen.fill(&[(4.0, 2.5), (12.0, 2.5), (12.0, 9.5), (8.0, 13.5), (4.0, 9.5)]),
         Insert => {
             pen.rect(2.0, 5.0, 14.0, 13.0);
