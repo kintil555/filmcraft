@@ -64,7 +64,7 @@ fn home_lists_new_open_autosave_and_recent_projects() {
     d.ok("engine.execute", json!({"command": "mode.home", "params": {}}));
     d.frames(3);
     let ids = d.ids("home.");
-    for id in ["home.new", "home.open", "home.back", "home.autosave", "home.recent.0", "home.recent.1"] {
+    for id in ["home.new", "home.open", "home.nav", "home.autosave", "home.filter", "home.recent.0", "home.recent.1"] {
         assert!(ids.iter().any(|a| a == id), "{id} in {ids:?}");
     }
     assert!(!ids.iter().any(|a| a == "home.recent.2"), "only the two recent projects are listed");
@@ -81,11 +81,11 @@ fn home_without_recent_projects_still_offers_new_and_open() {
 }
 
 #[test]
-fn back_to_editing_leaves_home() {
+fn edit_tab_leaves_home() {
     let mut d = Driver::new(&[]);
     d.ok("engine.execute", json!({"command": "mode.home", "params": {}}));
     d.frames(3);
-    d.ok("ui.click", json!({"id": "home.back"}));
+    d.ok("ui.click", json!({"id": "header.mode.edit"}));
     d.frames(3);
     assert!(d.ids("home.").is_empty(), "Home is closed");
 }

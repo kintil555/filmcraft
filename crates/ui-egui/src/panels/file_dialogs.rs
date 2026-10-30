@@ -18,6 +18,8 @@ pub struct FileDialogState {
     pub home_new_name: Option<String>,
     /// Focus the Home name field on its next frame.
     pub home_new_focus: bool,
+    /// Home ▸ Recent ▸ "Filter Recent Files".
+    pub home_filter: String,
 }
 
 fn modal_frame(t: &Tokens) -> Frame {
