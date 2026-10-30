@@ -5,7 +5,8 @@
 //! unknown option is an error (exit code 2), not a file to open.
 //!
 //! Without a project, `--demo` or `--empty`, Settings ▸ General ▸ At Startup decides: Show Home
-//! (the demo project), Open Most Recent, or an empty project.
+//! (an empty project; there is no Home screen yet), Open Most Recent (an empty project when there
+//! is none), or an empty project. The demo project opens only with `--demo`.
 //!
 //! `--control <port>` (or `FILMCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server;
 //! `FILMCRAFT_CONTROL_TOKEN` is required (see `docs/control-protocol.md`).
@@ -229,15 +230,11 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
         } else if !startup_flag && session.prefs.general.at_startup == "openMostRecent" {
             // Settings ▸ General ▸ At Startup ▸ Open Most Recent
             let recent = session.prefs.general.recent_projects.iter().find(|p| std::path::Path::new(p).exists()).cloned();
-            match recent {
-                Some(p) => {
-                    if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                        log::error!("{e}");
-                    }
-                }
-                None => {
-                    let _ = session.execute("file.openDemoProject", json!({}));
-                }
+            // with no recent project to open the app starts empty, not with the demo project
+            if let Some(p) = recent
+                && let Err(e) = session.execute("file.open", json!({"path": p}))
+            {
+                log::error!("{e}");
             }
         } else if !startup_flag && session.prefs.general.at_startup == "emptyProject" {
         } else if demo {
