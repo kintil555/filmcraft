@@ -802,9 +802,16 @@ fn keyframe_menu(
         let response = ui.button(label);
         app.auto.add(&format!("effectControls.keyframeMenu.{key}"), response.rect, label);
         if response.clicked() {
-            let mut params = params.clone();
-            params["interpolation"] = json!(key);
-            actions.push(("effects.setInterpolation".into(), params));
+            // a menu opened on a selected keyframe applies to the whole selection
+            let mut targets = if app.ui.keyframe_selection.contains(&target) { app.ui.keyframe_selection.clone() } else { vec![target.clone()] };
+            targets.dedup();
+            for t in targets {
+                let mut params = json!({"clip": t.clip, "effect": t.effect, "param": t.param, "mediaTime": t.time.0, "interpolation": key});
+                if let Some(mask) = t.mask {
+                    params["mask"] = json!(mask);
+                }
+                actions.push(("effects.setInterpolation".into(), params));
+            }
             ui.close();
         }
     }
