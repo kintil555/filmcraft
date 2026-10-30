@@ -276,6 +276,21 @@ mod tests {
         assert!(!off.scrub.is_open() && fill.lock().unwrap().is_none(), "nothing opens with the setting off");
     }
 
+    /// A press on the ruler calls `stop()` before the drag starts: with nothing playing it must
+    /// leave the opened scrub stream alone (reopening the device stalled the first moves).
+    #[test]
+    fn the_ruler_press_keeps_the_scrub_stream_open() {
+        let (mut app, fill) = app(true);
+        app.warm_scrub_audio(0.0);
+        assert!(app.scrub.is_open());
+        app.stop();
+        assert!(app.scrub.is_open() && fill.lock().unwrap().is_some(), "nothing was playing: the stream stays");
+
+        app.playback.playing = true;
+        app.stop();
+        assert!(!app.scrub.is_open() && fill.lock().unwrap().is_none(), "stopping playback still releases the device");
+    }
+
     #[test]
     fn nothing_plays_with_the_setting_off_or_while_playing() {
         let (mut app, fill) = app(false);
