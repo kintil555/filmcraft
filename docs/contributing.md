@@ -26,8 +26,8 @@ macOS.
 ## 2. Build and run
 
 ```sh
-cargo run --release -p filmcraft                      # desktop app with the demo project
-cargo run --release -p filmcraft -- --empty           # start without the demo project
+cargo run --release -p filmcraft                      # desktop app, empty project
+cargo run --release -p filmcraft -- --demo            # start with the demo project
 cargo run --release -p filmcraft -- --control 9876    # plus the JSON-lines control server
 cargo run --release -p filmcraft -- a.mp4 b.wav       # import media (or open a .fcproj)
 cargo run --release -p filmcraft-cli -- commands      # list engine commands

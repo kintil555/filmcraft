@@ -66,7 +66,9 @@ pub fn parse(env_control_port: Option<String>, args: impl IntoIterator<Item = Os
         control_port: None,
         control_input_only: false,
         files: Vec::new(),
-        demo: true,
+        // the demo project opens only with `--demo`: a normal start is an empty project, as in
+        // Premiere Pro, so nobody has to delete the demo timeline before starting their own
+        demo: false,
         startup_flag: false,
         recover: None,
         data_dir: None,
@@ -231,7 +233,7 @@ mod tests {
                 control_port: None,
                 control_input_only: false,
                 files: vec![],
-                demo: true,
+                demo: false,
                 startup_flag: false,
                 recover: None,
                 data_dir: None,
