@@ -671,8 +671,10 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
         let mut done = 0u64;
         match gray(mt0) {
             None => err = Some("can't decode the clip".into()),
-            Some((mut prev, mut k_prev)) => {
+            Some((first, mut k_prev)) => {
                 lock(&out).push((mt0, path.clone()));
+                let region0: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
+                let mut tracker = filmcraft_render::track::Tracker::new(first, &region0, method);
                 for step in 1..=steps {
                     if prog.cancel.load(Ordering::Relaxed) {
                         err = Some("stopped".into());
@@ -684,8 +686,8 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                         break;
                     };
                     let region: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
-                    let Some(st) = filmcraft_render::track::track_step(&prev, &next, &region, method) else {
-                        err = Some(format!("lost track after {} frame(s): not enough detail inside the mask", step - 1));
+                    let Some(st) = tracker.advance(next, &region) else {
+                        err = Some(format!("lost track after {} frame(s): the mask's content could not be found again", step - 1));
                         break;
                     };
                     // frame pixels → clip pixels
@@ -694,8 +696,14 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                     lock(&out).push((t, path.clone()));
                     done += 1;
                     prog.done.store(done, Ordering::Relaxed);
-                    *lock(&prog.status) = format!("Frame {step} of {steps} · {} features", st.inliers);
-                    prev = next;
+                    let note = if st.coasting {
+                        " · recovering"
+                    } else if st.anchored {
+                        " · drift-corrected"
+                    } else {
+                        ""
+                    };
+                    *lock(&prog.status) = format!("Frame {step} of {steps} · {} features{note}", st.inliers);
                     k_prev = k;
                 }
             }

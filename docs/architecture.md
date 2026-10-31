@@ -542,6 +542,10 @@ with different vertex counts hold). Feather, Opacity and Expansion are ordinary 
   transform moves the path, written as Mask Path keyframes while the background job runs (one undo
   step per run; `jobs.cancel` stops and keeps what was tracked). Frames are tracked at ≤ 960 px
   wide. On synthetic footage with known similarity motion the path stays within 0.3 px over 20 frames.
+  `render::track::Tracker` wraps this per run: features from an anchor frame are also tracked straight
+  to each new frame (seeded by the frame-to-frame prediction) to cancel drift, the anchor is renewed
+  when too few of them survive, and a failed match coasts on the decayed last motion for up to 12
+  frames while the anchor tries to re-acquire the content before the job reports a lost track.
 
 ### 5.4 Colour management
 

@@ -213,8 +213,18 @@ pub fn features(g: &Gray, region: &[Vec2], max: usize, min_dist: f32) -> Vec<[f3
 
 /// Pyramidal Lucas–Kanade: where `p` in `a` moved to in `b` (pyramids from [`Gray::pyramid`]).
 fn lk(pa: &[Gray], pb: &[Gray], p: [f32; 2]) -> Option<[f32; 2]> {
+    lk_from(pa, pb, p, [0.0, 0.0])
+}
+
+/// [`lk`] starting from a guessed full-resolution displacement `init` (the search then only has
+/// to correct the guess, which widens the capture range for long baselines and coasting).
+fn lk_from(pa: &[Gray], pb: &[Gray], p: [f32; 2], init: [f32; 2]) -> Option<[f32; 2]> {
     let levels = pa.len().min(pb.len());
-    let mut d = [0.0f32; 2];
+    if levels == 0 || !init[0].is_finite() || !init[1].is_finite() {
+        return None;
+    }
+    let top = (1u32 << (levels - 1)) as f32;
+    let mut d = [init[0] / top, init[1] / top];
     for lvl in (0..levels).rev() {
         let s = (1u32 << lvl) as f32;
         let (a, b) = (&pa[lvl], &pb[lvl]);
@@ -385,9 +395,14 @@ pub struct Step {
     pub features: usize,
     pub tracked: usize,
     pub inliers: usize,
+    /// The motion was extrapolated (the frame-to-frame match failed); see [`Tracker`].
+    pub coasting: bool,
+    /// The motion was corrected against the anchor frame (drift removed).
+    pub anchored: bool,
 }
 
 /// A frame prepared for tracking (its pyramid).
+#[derive(Clone)]
 pub struct Prepared {
     levels: Vec<Gray>,
 }
@@ -421,7 +436,132 @@ pub fn track_step(a: &Prepared, b: &Prepared, region: &[Vec2], method: TrackMeth
     if inliers < 3 {
         return None;
     }
-    Some(Step { transform, features: feats.len(), tracked: src.len(), inliers })
+    Some(Step { transform, features: feats.len(), tracked: src.len(), inliers, coasting: false, anchored: false })
+}
+
+/// Anchor features must agree forward and backward within this many pixels (longer baseline than
+/// the frame-to-frame check, so looser).
+const ANCHOR_FB_MAX: f32 = 1.0;
+/// Frames the tracker keeps extrapolating the last motion before giving up.
+pub const MAX_COAST: usize = 12;
+/// Per-frame decay of the extrapolated motion while coasting.
+const COAST_DAMPING: f64 = 0.85;
+
+/// Per-frame motion that is still believable (area change within 0.5×–2×, all finite).
+fn plausible(m: &Affine) -> bool {
+    let det = m.determinant();
+    [m.a, m.b, m.c, m.d, m.e, m.f].iter().all(|v| v.is_finite()) && det > 0.5 && det < 2.0
+}
+
+/// `m` with its motion scaled by `k` (0 = identity, 1 = unchanged).
+fn damp(m: &Affine, k: f64) -> Affine {
+    Affine { a: 1.0 + (m.a - 1.0) * k, b: m.b * k, c: m.c * k, d: 1.0 + (m.d - 1.0) * k, e: m.e * k, f: m.f * k }
+}
+
+/// Stateful mask tracker: [`track_step`] frame to frame, plus
+///
+/// * **drift correction** — features found once on an *anchor* frame are tracked straight from
+///   the anchor to each new frame (starting from the frame-to-frame prediction, so the search
+///   stays short) and the fitted motion replaces the accumulated one, so small per-frame errors
+///   cannot add up (the "template update with drift correction" idea of Matthews, Ishikawa &
+///   Baker, 2004). When too few anchor features survive (the look has changed) the anchor is
+///   renewed on the current frame.
+/// * **loss recovery** — when the frame-to-frame match fails (blur, occlusion, a flash) the last
+///   motion is extrapolated with decay for up to [`MAX_COAST`] frames while the anchor tries to
+///   re-acquire the object; only then does tracking give up.
+pub struct Tracker {
+    method: TrackMethod,
+    prev: Prepared,
+    anchor: Prepared,
+    anchor_feats: Vec<[f32; 2]>,
+    /// Maps anchor pixels to `prev` pixels.
+    anchor_to_prev: Affine,
+    /// Last believable per-frame motion (decayed while coasting).
+    velocity: Affine,
+    coasted: usize,
+}
+
+impl Tracker {
+    /// Start on `first`, with `region` (polygon in `first`'s pixels) as the object.
+    pub fn new(first: Prepared, region: &[Vec2], method: TrackMethod) -> Self {
+        let anchor_feats = features(first.base(), region, MAX_FEATURES, 5.0);
+        Self { method, anchor: first.clone(), prev: first, anchor_feats, anchor_to_prev: Affine::IDENTITY, velocity: Affine::IDENTITY, coasted: 0 }
+    }
+
+    /// Advance to `next`; `region` is the object polygon in the previous frame's pixels. The
+    /// returned transform maps previous-frame pixels to `next`'s. `None` once the track is lost.
+    pub fn advance(&mut self, next: Prepared, region: &[Vec2]) -> Option<Step> {
+        // 1. frame-to-frame motion, or extrapolation when it fails
+        let ff = track_step(&self.prev, &next, region, self.method).filter(|s| plausible(&s.transform));
+        let (mut step, coasting) = match ff {
+            Some(s) => {
+                self.velocity = s.transform;
+                self.coasted = 0;
+                (s, false)
+            }
+            None => {
+                self.coasted += 1;
+                if self.coasted > MAX_COAST {
+                    return None;
+                }
+                self.velocity = damp(&self.velocity, COAST_DAMPING);
+                (Step { transform: self.velocity, features: 0, tracked: 0, inliers: 0, coasting: true, anchored: false }, true)
+            }
+        };
+        // 2. anchor refinement
+        let pred = step.transform.then_apply(&self.anchor_to_prev);
+        let mut anchor_to_next = pred;
+        let mut renew = !coasting;
+        if let Some((t_abs, inl)) = self.register_anchor(&next, &pred) {
+            let refined = self.anchor_to_prev.inverse().map(|inv| t_abs.then_apply(&inv)).filter(plausible);
+            if let (Some(r), true) = (refined, inl >= (self.anchor_feats.len() / 3).max(6)) {
+                step = Step { transform: r, inliers: inl, anchored: true, ..step };
+                anchor_to_next = t_abs;
+                renew = inl * 2 < self.anchor_feats.len();
+                if coasting {
+                    // the anchor re-acquired the object
+                    self.coasted = 0;
+                    self.velocity = r;
+                    step.coasting = false;
+                }
+            }
+        }
+        // 3. bookkeeping
+        let region_next: Vec<Vec2> = region.iter().map(|q| step.transform.apply(*q)).collect();
+        self.anchor_to_prev = anchor_to_next;
+        self.prev = next;
+        if renew {
+            let feats = features(self.prev.base(), &region_next, MAX_FEATURES, 5.0);
+            if feats.len() >= 6 {
+                self.anchor = self.prev.clone();
+                self.anchor_feats = feats;
+                self.anchor_to_prev = Affine::IDENTITY;
+            }
+        }
+        Some(step)
+    }
+
+    /// Track the anchor features directly to `next`, starting from `pred` (anchor → next).
+    /// Returns the robustly fitted anchor → next motion and its inlier count.
+    fn register_anchor(&self, next: &Prepared, pred: &Affine) -> Option<(Affine, usize)> {
+        if self.anchor_feats.len() < 6 {
+            return None;
+        }
+        let pairs: Vec<(Vec2, Vec2)> = self
+            .anchor_feats
+            .par_iter()
+            .filter_map(|&p| {
+                let g = pred.apply(Vec2::new(p[0] as f64, p[1] as f64));
+                let init = [g.x as f32 - p[0], g.y as f32 - p[1]];
+                let q = lk_from(&self.anchor.levels, &next.levels, p, init)?;
+                let back = lk_from(&next.levels, &self.anchor.levels, q, [p[0] - q[0], p[1] - q[1]])?;
+                let fb = ((back[0] - p[0]).powi(2) + (back[1] - p[1]).powi(2)).sqrt();
+                (fb < ANCHOR_FB_MAX).then(|| (Vec2::new(p[0] as f64, p[1] as f64), Vec2::new(q[0] as f64, q[1] as f64)))
+            })
+            .collect();
+        let (src, dst): (Vec<Vec2>, Vec<Vec2>) = pairs.into_iter().unzip();
+        fit_robust(self.method, &src, &dst)
+    }
 }
 
 #[cfg(test)]
@@ -523,5 +663,58 @@ mod tests {
         for p in &src {
             assert!((m.apply(*p) - truth.apply(*p)).length() < 1e-6);
         }
+    }
+
+    /// Run a [`Tracker`] over `frames` frames of the moving disc; frames listed in `blank` are
+    /// featureless (a flash or an occlusion). Returns the worst probe error over the other frames.
+    fn run_tracker(method: TrackMethod, frames: usize, blank: &[usize]) -> f64 {
+        let (w, h) = (320, 240);
+        let still = pose(0.0, 0.0, 0.0);
+        let mut region = circle(Vec2::new(150.0, 120.0), 50.0);
+        let mut tracker = Tracker::new(Prepared::new(frame(w, h, &still)), &region, method);
+        let probe = [Vec2::new(30.0, 0.0), Vec2::new(-20.0, 25.0), Vec2::new(0.0, -40.0)];
+        let mut tracked: Vec<Vec2> = probe.iter().map(|o| still.apply(*o)).collect();
+        let mut worst = 0.0f64;
+        for k in 1..=frames {
+            let hidden = blank.contains(&k);
+            let g = if hidden { Gray::new(w, h, vec![0.5; w * h]) } else { frame(w, h, &pose(k as f64, 0.0, 0.0)) };
+            let st = tracker.advance(Prepared::new(g), &region).expect("tracked");
+            region = region.iter().map(|p| st.transform.apply(*p)).collect();
+            tracked = tracked.iter().map(|p| st.transform.apply(*p)).collect();
+            if !hidden {
+                for (o, t) in probe.iter().zip(&tracked) {
+                    worst = worst.max((pose(k as f64, 0.0, 0.0).apply(*o) - *t).length());
+                }
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn tracker_follows_long_sequence() {
+        let e = run_tracker(TrackMethod::Position, 30, &[]);
+        assert!(e < 0.5, "max drift {e} px");
+    }
+
+    #[test]
+    fn tracker_recovers_after_blank_frames() {
+        let e = run_tracker(TrackMethod::Position, 25, &[10, 11, 12]);
+        assert!(e < 1.5, "max error {e} px after recovery");
+    }
+
+    #[test]
+    fn tracker_gives_up_after_long_loss() {
+        let (w, h) = (320, 240);
+        let still = pose(0.0, 0.0, 0.0);
+        let region = circle(Vec2::new(150.0, 120.0), 50.0);
+        let mut tracker = Tracker::new(Prepared::new(frame(w, h, &still)), &region, TrackMethod::Position);
+        let mut lost = false;
+        for _ in 0..=MAX_COAST + 1 {
+            if tracker.advance(Prepared::new(Gray::new(w, h, vec![0.5; w * h])), &region).is_none() {
+                lost = true;
+                break;
+            }
+        }
+        assert!(lost);
     }
 }
