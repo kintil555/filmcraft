@@ -212,6 +212,60 @@ pub struct TimelineView {
     pub track_lanes: std::collections::BTreeMap<u64, String>,
 }
 
+/// Timeline settings kept across launches (`ui_state.json` in the data directory).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TimelinePrefs {
+    pub show_thumbnails: bool,
+    pub thumbnail_mode: ThumbnailMode,
+    pub show_waveforms: bool,
+    pub follow: bool,
+    pub header_w: f32,
+}
+
+impl Default for TimelinePrefs {
+    fn default() -> Self {
+        let v = TimelineView::default();
+        Self { show_thumbnails: v.show_thumbnails, thumbnail_mode: v.thumbnail_mode, show_waveforms: v.show_waveforms, follow: v.follow, header_w: v.header_w }
+    }
+}
+
+impl TimelinePrefs {
+    pub const FILE: &'static str = "ui_state.json";
+
+    pub fn of(v: &TimelineView) -> Self {
+        Self { show_thumbnails: v.show_thumbnails, thumbnail_mode: v.thumbnail_mode, show_waveforms: v.show_waveforms, follow: v.follow, header_w: v.header_w }
+    }
+
+    pub fn apply(&self, v: &mut TimelineView) {
+        v.show_thumbnails = self.show_thumbnails;
+        v.thumbnail_mode = self.thumbnail_mode;
+        v.show_waveforms = self.show_waveforms;
+        v.follow = self.follow;
+        if self.header_w.is_finite() {
+            v.header_w = self.header_w.clamp(80.0, 600.0);
+        }
+    }
+
+    pub fn load(path: &std::path::Path) -> Self {
+        use std::io::Read;
+        let Some(bytes) = std::fs::File::open(path).ok().and_then(|f| {
+            let mut b = Vec::new();
+            f.take(65_536).read_to_end(&mut b).ok()?;
+            Some(b)
+        }) else {
+            return Self::default();
+        };
+        serde_json::from_slice(&bytes).unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::rename(tmp, path)
+    }
+}
+
 impl TimelineView {
     /// The zoom / scroll animation is still running (element rects are moving).
     pub fn animating(&self) -> bool {
@@ -233,7 +287,7 @@ impl Default for TimelineView {
             audio_track_h: 56.0,
             header_w: 204.0,
             show_thumbnails: true,
-            thumbnail_mode: ThumbnailMode::Head,
+            thumbnail_mode: ThumbnailMode::Continuous,
             show_waveforms: true,
             follow: true,
             fit_pending: true,
@@ -248,11 +302,11 @@ impl Default for TimelineView {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThumbnailMode {
     /// The clip's first frame at its head.
-    #[default]
     Head,
     /// The first frame at the head and the last one at the tail.
     HeadAndTail,
     /// Frames side by side across the whole clip.
+    #[default]
     Continuous,
 }
 

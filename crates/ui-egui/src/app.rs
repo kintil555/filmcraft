@@ -29,11 +29,15 @@ impl FilmcraftApp {
         let workspaces =
             session.prefs_path.as_ref().and_then(|p| p.parent()).map(|d| dock::WorkspacePrefs::load(&d.join(dock::WORKSPACES_FILE))).unwrap_or_default();
         let language = i18n::Language::parse(&session.prefs.general.interface_language).unwrap_or_default();
+        let timeline_prefs =
+            session.prefs_path.as_ref().and_then(|p| p.parent()).map(|d| state::TimelinePrefs::load(&d.join(state::TimelinePrefs::FILE))).unwrap_or_default();
         let ime_document_epoch = session.document_epoch;
         let ime_active_sequence = session.state.active_sequence;
+        let mut ui = UiState { language, ..UiState::default() };
+        timeline_prefs.apply(&mut ui.timeline);
         Self {
             session,
-            ui: UiState { language, ..UiState::default() },
+            ui,
             tokens: Tokens::for_kind(ThemeKind::Dark),
             frames,
             playback: Playback { speed: 1.0, ..Default::default() },
@@ -123,6 +127,8 @@ impl FilmcraftApp {
             applied_prefs: None,
             applied_ui_scale: None,
             workspace_restored: false,
+            persisted_dock: None,
+            persisted_timeline: None,
             workspaces,
             menu_workspaces: Default::default(),
         }
@@ -366,6 +372,7 @@ impl FilmcraftApp {
             self.auto.begin_frame();
             self.apply_prefs(&ctx);
             self.sync_timeline_view();
+            self.persist_ui_state(&ctx);
             panels::metadata::follow_selection(self);
             self.handle_drops(&ctx);
             self.begin_press(&ctx);

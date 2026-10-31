@@ -14,9 +14,53 @@ impl FilmcraftApp {
         }
     }
 
+    /// Keep layout and timeline settings across launches: a changed docking layout is written to
+    /// the current workspace and changed timeline settings to `ui_state.json`, once no pointer
+    /// button is held (so a splitter drag saves once, when released).
+    pub(super) fn persist_ui_state(&mut self, ctx: &egui::Context) {
+        if !self.workspace_restored || ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        match &self.persisted_dock {
+            None => self.persisted_dock = Some(self.ui.dock.clone()),
+            Some(last) if *last != self.ui.dock => {
+                self.persisted_dock = Some(self.ui.dock.clone());
+                let name = self.ui.workspace.clone();
+                match dock::SavedWorkspace::new(&name, &self.ui.dock) {
+                    Ok(entry) => {
+                        let mut next = self.workspaces.clone();
+                        match next.saved.iter_mut().find(|s| s.name == name) {
+                            Some(s) => *s = entry,
+                            None => next.saved.push(entry),
+                        }
+                        if let Err(e) = self.set_workspaces(next) {
+                            log::warn!("{e}");
+                        }
+                    }
+                    Err(e) => log::warn!("layout not saved: {e}"),
+                }
+            }
+            _ => {}
+        }
+        let now = state::TimelinePrefs::of(&self.ui.timeline);
+        match self.persisted_timeline {
+            None => self.persisted_timeline = Some(now),
+            Some(last) if last != now => {
+                self.persisted_timeline = Some(now);
+                if let Some(d) = self.workspaces_path().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+                    if let Err(e) = now.save(&d.join(state::TimelinePrefs::FILE)) {
+                        log::warn!("saving timeline settings: {e}");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn set_workspace(&mut self, name: &str) {
         self.ui.workspace = name.to_string();
         self.ui.dock = dock::saved_docking(&self.workspaces, name);
+        self.persisted_dock = Some(self.ui.dock.clone());
         self.pending_panel_raise = None;
         self.ui.keys.maximized = None;
         if self.workspaces.current != name {

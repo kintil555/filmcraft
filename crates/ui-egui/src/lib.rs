@@ -371,6 +371,10 @@ pub struct FilmcraftApp {
     /// Settings ▸ Appearance ▸ UI Scale last applied, with the system scale it was applied for.
     applied_ui_scale: Option<(Option<f32>, f32)>,
     workspace_restored: bool,
+    /// The docking layout last written to the current workspace (auto-saved on change).
+    persisted_dock: Option<dock::Layout>,
+    /// The timeline settings last written to `ui_state.json`.
+    persisted_timeline: Option<state::TimelinePrefs>,
     /// Window ▸ Workspaces: saved layouts ([`dock::WORKSPACES_FILE`] in the data directory).
     pub workspaces: dock::WorkspacePrefs,
     /// Workspace names and the current one, as last handed to the native menu.
