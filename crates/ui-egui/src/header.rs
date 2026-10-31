@@ -59,6 +59,12 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         }
         x += gw + 24.0;
     }
+    // Home keeps only the Home button, the mode tabs, Discord and Full screen: no menus, title or
+    // the other quick actions (they belong to a project that is open).
+    if app.ui.mode == Mode::Home {
+        show_home_right(app, ui, rect);
+        return;
+    }
     let mut left_end = x;
     // In-window menus when there is no native menu bar.
     if app.ui.show_menu_bar {
@@ -185,5 +191,33 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         if area.response.clicked_elsewhere() && !(ws_resp.clicked() || wresp.clicked()) {
             ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
         }
+    }
+}
+
+/// The right side of the header on Home: the Discord button next to Full screen.
+fn show_home_right(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
+    let t = app.tokens;
+    let p = ui.painter().clone();
+    let fs = Rect::from_center_size(pos2(rect.max.x - 14.0 - 14.0, rect.center().y), vec2(28.0, 28.0));
+    let fs_resp = ui.interact(fs, egui::Id::unique(("hdr", "fullscreen")), Sense::click()).on_hover_text(tl!("Full screen"));
+    app.auto.add("header.fullscreen", fs, tl!("Full screen"));
+    if fs_resp.hovered() {
+        p.rect_filled(fs, 4.0, t.hover);
+    }
+    icons::paint(&p, fs.shrink(6.0), Icon::Fullscreen, if fs_resp.hovered() { t.text } else { t.text_dim });
+    if fs_resp.clicked() {
+        let on = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
+    }
+    let g = p.layout_no_wrap("Discord".to_string(), Tokens::ui(12.0), Color32::WHITE);
+    let w = g.size().x + 34.0;
+    let r = Rect::from_min_size(pos2(fs.min.x - w - 10.0, rect.center().y - 12.0), vec2(w, 24.0));
+    let resp = ui.interact(r, egui::Id::unique("hdr-discord"), Sense::click()).on_hover_text(tl!("Join the ArtCraft Discord (discord.gg/artcraft)"));
+    app.auto.add("header.discord", r, "Join the ArtCraft Discord");
+    p.rect_filled(r, 12.0, if resp.hovered() { t.accent_hover } else { t.accent });
+    icons::paint(&p, Rect::from_center_size(pos2(r.min.x + 14.0, r.center().y), vec2(14.0, 14.0)), Icon::Chat, Color32::WHITE);
+    p.galley(pos2(r.min.x + 25.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+    if resp.clicked() {
+        crate::links::open(app, ui.ctx(), crate::links::DISCORD);
     }
 }

@@ -7,7 +7,7 @@
 //! Cancel prompt first, so Home never discards work.
 //!
 //! Automation ids: `home.new`, `home.open`, `home.nav`, `home.autosave`, `home.save`, `home.filter`,
-//! `home.new.name`, `home.new.create`, `home.new.cancel`, `home.recent.<n>`, `home.recent.<n>.remove`.
+//! `home.new.*` (the New Project dialog, see `file_dialogs::show_new_project`), `home.recent.<n>`, `home.recent.<n>.remove`.
 
 use egui::{Align2, Color32, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
@@ -155,6 +155,7 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     sidebar(app, ui, side);
     ui.painter().line_segment([side.right_top(), side.right_bottom()], Stroke::new(1.0, t.separator));
     main_area(app, ui, main);
+    crate::panels::file_dialogs::show_new_project(app, ui.ctx());
 }
 
 /// New Project, Open Project, the Home entry, and Auto Save at the bottom.
@@ -165,7 +166,7 @@ fn sidebar(app: &mut FilmcraftApp, ui: &mut egui::Ui, side: Rect) {
 
     let new = Rect::from_min_size(pos2(x, side.min.y + 20.0), vec2(w.min(110.0), 30.0));
     if pill(app, ui, "home.new", new, tl!("New Project"), true) && !blocked_by_unsaved(app, &ctx) {
-        app.file_dialogs.home_new_name = Some("Untitled".into());
+        app.file_dialogs.home_new = Some(crate::panels::file_dialogs::NewProjectForm::default());
         app.file_dialogs.home_new_focus = true;
     }
 
@@ -203,7 +204,7 @@ fn sidebar(app: &mut FilmcraftApp, ui: &mut egui::Ui, side: Rect) {
     }
 }
 
-/// The unsaved-changes notice, the new-project name field, and the Recent table.
+/// The unsaved-changes notice and the Recent table (New Project opens its own dialog).
 fn main_area(app: &mut FilmcraftApp, ui: &mut egui::Ui, main: Rect) {
     let t = app.tokens;
     let ctx = ui.ctx().clone();
@@ -220,36 +221,6 @@ fn main_area(app: &mut FilmcraftApp, ui: &mut egui::Ui, main: Rect) {
             let _ = crate::menus::invoke(app, &ctx, "file.save", json!({}));
         }
         y += 44.0;
-    }
-
-    // Name field for a new project.
-    if let Some(mut name) = app.file_dialogs.home_new_name.take() {
-        ui.painter().text(pos2(main.min.x, y + 15.0), Align2::LEFT_CENTER, tl!("Project name"), Tokens::ui(13.0), t.text_dim);
-        let field = Rect::from_min_size(pos2(main.min.x + 110.0, y), vec2(260.0, 30.0));
-        let edit = ui.put(field, egui::TextEdit::singleline(&mut name).desired_width(field.width()).char_limit(120));
-        app.auto.add("home.new.name", field, tl!("Project name"));
-        if std::mem::take(&mut app.file_dialogs.home_new_focus) {
-            edit.request_focus();
-        }
-        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let create = Rect::from_min_size(pos2(field.max.x + 12.0, y), vec2(88.0, 30.0));
-        let cancel = Rect::from_min_size(pos2(create.max.x + 8.0, y), vec2(88.0, 30.0));
-        let mut keep = true;
-        if pill(app, ui, "home.new.create", create, tl!("Create"), true) || enter {
-            let trimmed = name.trim();
-            let project = if trimmed.is_empty() { "Untitled" } else { trimmed };
-            match crate::menus::invoke(app, &ctx, "file.newProject", json!({"name": project})) {
-                Ok(_) => app.ui.mode = Mode::Edit,
-                Err(e) => app.ui.status = e,
-            }
-            keep = false;
-        } else if pill(app, ui, "home.new.cancel", cancel, tl!("Cancel"), false) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            keep = false;
-        }
-        if keep {
-            app.file_dialogs.home_new_name = Some(name);
-        }
-        y += 46.0;
     }
 
     recent_table(app, ui, main, y + 4.0);
