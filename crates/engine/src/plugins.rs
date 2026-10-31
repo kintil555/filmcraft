@@ -182,7 +182,7 @@ impl PluginHost {
     pub fn presets(&self, disabled: &[String]) -> Vec<EffectPreset> {
         let mut out: Vec<EffectPreset> = Vec::new();
         for p in &self.plugins {
-            if p.error.is_some() || disabled.iter().any(|d| *d == p.manifest.id) {
+            if p.error.is_some() || disabled.contains(&p.manifest.id) {
                 continue;
             }
             for preset in &p.presets {
@@ -264,10 +264,10 @@ fn set_enabled(s: &mut Session, p: &Value) -> Result<Value> {
         s.prefs.plugins.disabled.push(id);
     }
     s.presets.plugin = s.plugins.presets(&s.prefs.plugins.disabled);
-    if let Some(path) = s.prefs_path.clone() {
-        if let Err(e) = s.prefs.save(&path) {
-            log::warn!("could not save preferences: {e}");
-        }
+    if let Some(path) = s.prefs_path.clone()
+        && let Err(e) = s.prefs.save(&path)
+    {
+        log::warn!("could not save preferences: {e}");
     }
     Ok(list_json(s))
 }
