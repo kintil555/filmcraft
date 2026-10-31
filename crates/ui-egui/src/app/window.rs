@@ -47,10 +47,10 @@ impl FilmcraftApp {
             None => self.persisted_timeline = Some(now),
             Some(last) if last != now => {
                 self.persisted_timeline = Some(now);
-                if let Some(d) = self.workspaces_path().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-                    if let Err(e) = now.save(&d.join(state::TimelinePrefs::FILE)) {
-                        log::warn!("saving timeline settings: {e}");
-                    }
+                if let Some(d) = self.workspaces_path().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                    && let Err(e) = now.save(&d.join(state::TimelinePrefs::FILE))
+                {
+                    log::warn!("saving timeline settings: {e}");
                 }
             }
             _ => {}

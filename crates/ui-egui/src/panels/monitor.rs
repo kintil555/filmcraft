@@ -174,6 +174,19 @@ fn draw_picture(app: &mut FilmcraftApp, ui: &mut egui::Ui, which: Which, mv: &cr
         let bar = Rect::from_min_max(pos2(ra.min.x, ra.max.y + 2.0), pos2(video_area.max.x, ra.max.y + 22.0));
         monitor_view::compare_bar(app, ui, bar, rate, drop_frame);
     }
+    draw_picture_overlays(ui, mv, pic, video_area, display, compare, t.text_dim);
+}
+
+/// The safe-margin guides and the display-mode label over the picture.
+fn draw_picture_overlays(
+    ui: &mut egui::Ui,
+    mv: &crate::state::MonitorView,
+    pic: Rect,
+    video_area: Rect,
+    display: DisplayMode,
+    compare: bool,
+    label_color: Color32,
+) {
     if mv.safe_margins {
         for (f, c) in [(0.9, Color32::from_white_alpha(120)), (0.8, Color32::from_white_alpha(90))] {
             let r = Rect::from_center_size(pic.center(), pic.size() * f);
@@ -194,7 +207,7 @@ fn draw_picture(app: &mut FilmcraftApp, ui: &mut egui::Ui, which: Which, mv: &cr
             DisplayMode::Comparison => tl!("Comparison"),
             DisplayMode::VideoAndWaveform => tl!("Video and Waveform"),
         };
-        ui.painter().text(pos2(video_area.max.x - 8.0, video_area.min.y + 6.0), Align2::RIGHT_TOP, label, Tokens::ui(10.0), t.text_dim);
+        ui.painter().text(pos2(video_area.max.x - 8.0, video_area.min.y + 6.0), Align2::RIGHT_TOP, label, Tokens::ui(10.0), label_color);
     }
 }
 

@@ -153,7 +153,7 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
     let Some(mut d) = app.ui.easing.take() else { return };
     let mut open = true;
     egui::Window::new(tl!("Keyframe Easing"))
-        .id(egui::Id::new("easing-editor"))
+        .id(egui::Id::unique("easing-editor"))
         .collapsible(false)
         .resizable(false)
         .open(&mut open)
@@ -188,7 +188,7 @@ fn advanced_page(app: &mut FilmcraftApp, ui: &mut egui::Ui, d: &mut EasingDraft)
     let current = INTERPS.iter().find(|(k, _)| *k == d.interp).map_or("Linear", |(_, l)| *l);
     ui.horizontal(|ui| {
         ui.label(tl!("Interpolation"));
-        let combo = egui::ComboBox::from_id_salt("easing-interp").selected_text(crate::i18n::t(current)).show_ui(ui, |ui| {
+        let combo = craft_ui::ComboBox::from_id_salt("easing-interp").selected_text(crate::i18n::t(current)).show_ui(ui, |ui| {
             for (key, label) in INTERPS {
                 ui.selectable_value(&mut d.interp, key.to_string(), crate::i18n::t(label));
             }
@@ -256,7 +256,7 @@ fn simple_page(app: &mut FilmcraftApp, ui: &mut egui::Ui, d: &mut EasingDraft) {
         }
         let at = if ease { flat } else { idle };
         let r = Rect::from_center_size(at, vec2(22.0, 22.0));
-        let resp = ui.interact(r, egui::Id::new(("easing-handle", n)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        let resp = ui.interact(r, egui::Id::unique(("easing-handle", n)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         app.auto.add(id, r, tl!("Easing handle"));
         if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged()) {
             let fx = f64::from(((pos.x - plot.min.x) / plot.width()).clamp(0.0, 1.0));
@@ -287,7 +287,7 @@ fn simple_page(app: &mut FilmcraftApp, ui: &mut egui::Ui, d: &mut EasingDraft) {
         let row = (i / 2) as f32;
         let r = Rect::from_min_size(pos2(plot.max.x + 34.0 + col * 76.0, plot.min.y - 6.0 + row * 100.0), vec2(68.0, 92.0));
         let on = is_preset(d, preset);
-        let resp = ui.interact(r, egui::Id::new(("easing-preset", preset.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = ui.interact(r, egui::Id::unique(("easing-preset", preset.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         app.auto.add(&format!("easing.preset.{}", preset.id), r, preset.label);
         if on || resp.hovered() {
             p.rect_filled(r, 8.0, if on { t.app_bg } else { t.hover });

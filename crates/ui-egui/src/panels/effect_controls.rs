@@ -472,17 +472,17 @@ fn tracking_rows(
     let t = app.tokens;
     let base = "effectControls.tracking_motion";
     // 1. the region
-    let r = tracking_row(app, ui, body, lane, &tl!("Tracking Region"));
+    let r = tracking_row(app, ui, body, lane, tl!("Tracking Region"));
     // Auto picks the most trackable patch under the playhead; Manual drops a box to place by hand
     for (x, mode, label) in [(160.0, "auto", tl!("Auto Region")), (264.0, "manual", tl!("Manual Region"))] {
-        let (clicked, _) = row_button(app, ui, r, x, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx, mode)), &label, &format!("{base}.setup.{mode}"));
+        let (clicked, _) = row_button(app, ui, r, x, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx, mode)), label, &format!("{base}.setup.{mode}"));
         if clicked {
             actions.push(("tracking.setup".into(), json!({"clip": clip.0, "effect": idx, "mode": mode, "reset": true})));
         }
     }
     // 2. tracking: the Mask Path buttons (backward / forward, one frame or all)
     if !e.masks.is_empty() {
-        let r = tracking_row(app, ui, body, lane, &tl!("Track"));
+        let r = tracking_row(app, ui, body, lane, tl!("Track"));
         let mut vui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(Rect::from_min_max(pos2(r.min.x + 160.0, r.min.y + 1.0), pos2(r.max.x - 26.0, r.max.y - 1.0)))
@@ -502,8 +502,8 @@ fn tracking_rows(
             }
         }
     }
-    let r = tracking_row(app, ui, body, lane, &tl!("Attached Clips"));
-    let (_, resp) = row_button(app, ui, r, 160.0, 96.0, egui::Id::unique(("fx-track-attach", clip.0, idx)), &tl!("Attach Clip…"), &format!("{base}.attach"));
+    let r = tracking_row(app, ui, body, lane, tl!("Attached Clips"));
+    let (_, resp) = row_button(app, ui, r, 160.0, 96.0, egui::Id::unique(("fx-track-attach", clip.0, idx)), tl!("Attach Clip…"), &format!("{base}.attach"));
     egui::Popup::menu(&resp).show(|ui| {
         if e.masks.first().is_none_or(|m| !m.path.is_animated()) {
             ui.label(egui::RichText::new(tl!("Track the region first")).color(t.text_dim));
@@ -518,7 +518,7 @@ fn tracking_rows(
         }
     });
     if !names.is_empty() {
-        let (clicked, _) = row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-update", clip.0, idx)), &tl!("Update"), &format!("{base}.update"));
+        let (clicked, _) = row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-update", clip.0, idx)), tl!("Update"), &format!("{base}.update"));
         if clicked {
             actions.push(("tracking.update".into(), json!({"clip": clip.0, "effect": idx})));
         }
@@ -533,7 +533,7 @@ fn tracking_rows(
             t.text,
         );
         let (clicked, _) =
-            row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-detach", clip.0, idx, id.0)), &tl!("Detach"), &format!("{base}.detach.{}", id.0));
+            row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-detach", clip.0, idx, id.0)), tl!("Detach"), &format!("{base}.detach.{}", id.0));
         if clicked {
             actions.push(("tracking.detach".into(), json!({"clip": clip.0, "effect": idx, "follower": id.0})));
         }
