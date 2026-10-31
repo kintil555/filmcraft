@@ -544,7 +544,10 @@ mod tests {
 
     fn square(c: Vec2, half: f64, rot_deg: f64) -> Vec<Vec2> {
         let (s, k) = rot_deg.to_radians().sin_cos();
-        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(x, y)| Vec2::new(c.x + half * (x * k - y * s), c.y + half * (x * s + y * k))).collect()
+        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .iter()
+            .map(|(x, y)| Vec2::new(c.x + half * (x * k - y * s), c.y + half * (x * s + y * k)))
+            .collect()
     }
 
     #[test]

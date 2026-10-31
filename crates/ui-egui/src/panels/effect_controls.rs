@@ -458,7 +458,17 @@ fn row_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, r: Rect, x: f32, w: f32
 /// trackable patch of the frame, Manual a box to place yourself), the tracking buttons, and the
 /// clips (text, images…) that follow the track.
 #[allow(clippy::too_many_arguments)]
-fn tracking_rows(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &Rect, clip: ClipId, idx: usize, e: &EffectInstance, it: &TrackItem, actions: &mut Vec<(String, Value)>) {
+fn tracking_rows(
+    app: &mut FilmcraftApp,
+    ui: &mut egui::Ui,
+    body: Rect,
+    lane: &Rect,
+    clip: ClipId,
+    idx: usize,
+    e: &EffectInstance,
+    it: &TrackItem,
+    actions: &mut Vec<(String, Value)>,
+) {
     let t = app.tokens;
     let base = "effectControls.tracking_motion";
     // 1. the region
@@ -474,7 +484,9 @@ fn tracking_rows(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &R
     if !e.masks.is_empty() {
         let r = tracking_row(app, ui, body, lane, &tl!("Track"));
         let mut vui = ui.new_child(
-            egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(r.min.x + 160.0, r.min.y + 1.0), pos2(r.max.x - 26.0, r.max.y - 1.0))).layout(egui::Layout::left_to_right(egui::Align::Center)),
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_max(pos2(r.min.x + 160.0, r.min.y + 1.0), pos2(r.max.x - 26.0, r.max.y - 1.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         crate::panels::masks::path_value(app, &mut vui, clip, idx, Some(0), actions);
     }
@@ -520,7 +532,8 @@ fn tracking_rows(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &R
             Tokens::ui(12.0),
             t.text,
         );
-        let (clicked, _) = row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-detach", clip.0, idx, id.0)), &tl!("Detach"), &format!("{base}.detach.{}", id.0));
+        let (clicked, _) =
+            row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-detach", clip.0, idx, id.0)), &tl!("Detach"), &format!("{base}.detach.{}", id.0));
         if clicked {
             actions.push(("tracking.detach".into(), json!({"clip": clip.0, "effect": idx, "follower": id.0})));
         }
