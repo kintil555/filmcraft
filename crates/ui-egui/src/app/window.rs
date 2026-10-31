@@ -27,7 +27,9 @@ impl FilmcraftApp {
         let name = self.ui.workspace.clone();
         if dock::saved_docking(&self.workspaces, &name) == self.ui.dock {
             // nothing to remember; a missing file is fine
-            if path.exists() && let Err(e) = std::fs::remove_file(&path) {
+            if path.exists()
+                && let Err(e) = std::fs::remove_file(&path)
+            {
                 log::warn!("clearing the remembered layout: {e}");
             }
             return;
