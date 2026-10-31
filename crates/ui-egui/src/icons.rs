@@ -424,8 +424,10 @@ fn along_diagonal(origin: (f32, f32), pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
 /// A capsule (two half circles joined by straight sides) centred on `c`, its long axis running up
 /// and to the right: one link of a chain.
 fn capsule(c: (f32, f32), half: f32, r: f32) -> Vec<(f32, f32)> {
-    let mut pts: Vec<(f32, f32)> = arc_pts(-half, 0.0, r, 90.0, 270.0, 10);
-    pts.extend(arc_pts(half, 0.0, r, -90.0, 90.0, 10));
+    // 9 steps (20 degrees), not 10: at 18 degrees a chord of the rotated arc is exactly horizontal or
+    // vertical, and such a sub-pixel chord snaps to the pixel grid unevenly at small sizes.
+    let mut pts: Vec<(f32, f32)> = arc_pts(-half, 0.0, r, 90.0, 270.0, 9);
+    pts.extend(arc_pts(half, 0.0, r, -90.0, 90.0, 9));
     along_diagonal(c, &pts)
 }
 
@@ -601,7 +603,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(9.5, 10.75), (10.5, 10.75)]);
         }
         Camera => {
-            pen.closed(&[(2.0, 5.0), (5.0, 5.0), (6.0, 3.5), (10.0, 3.5), (11.0, 5.0), (14.0, 5.0), (14.0, 12.5), (2.0, 12.5)]);
+            pen.closed(&[(2.0, 5.0), (4.0, 5.0), (6.0, 3.5), (10.0, 3.5), (12.0, 5.0), (14.0, 5.0), (14.0, 12.5), (2.0, 12.5)]);
             pen.circle(8.0, 8.7, 2.3);
         }
         Loop => {
@@ -714,8 +716,8 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Trash => {
             pen.line(&[(2.5, 4.0), (13.5, 4.0)]);
-            pen.line(&[(6.0, 4.0), (6.5, 2.5), (9.5, 2.5), (10.0, 4.0)]);
-            pen.closed(&[(3.8, 4.0), (12.2, 4.0), (11.4, 14.0), (4.6, 14.0)]);
+            pen.line(&[(5.0, 4.0), (6.5, 2.5), (9.5, 2.5), (11.0, 4.0)]);
+            pen.closed(&[(4.0, 4.0), (12.0, 4.0), (10.0, 14.0), (6.0, 14.0)]);
         }
         Home => {
             pen.line(&[(1.5, 8.0), (8.0, 2.0), (14.5, 8.0)]);
