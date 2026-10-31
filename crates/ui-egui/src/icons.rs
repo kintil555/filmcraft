@@ -164,17 +164,16 @@ impl Pen16<'_> {
         let c = self.rect.center();
         pos2(self.snap(q.x, c.x, mid_x), self.snap(q.y, c.y, mid_y))
     }
-    /// Grid points to screen. Points on a horizontal or vertical segment (one that runs less than a
-    /// device pixel sideways, so it draws straight anyway) snap to device pixels so the segment is
-    /// drawn crisp; points between slanted segments keep their exact place.
+    /// Grid points to screen. Points on a horizontal or vertical segment (exactly axis-aligned on the
+    /// design grid) snap to device pixels so the segment is drawn crisp; points between slanted
+    /// segments keep their exact place.
     fn crisp(&self, pts: &[(f32, f32)], closed: bool) -> Vec<Pos2> {
         let n = pts.len();
-        let ppp = self.painter.pixels_per_point();
         let q: Vec<Pos2> = pts.iter().map(|(x, y)| self.p(*x, *y)).collect();
-        let seg = |i: usize, j: usize| {
-            let d = (q[i] - q[j]) * ppp;
-            (d.x.abs() < 1.0, d.y.abs() < 1.0) // (vertical, horizontal)
-        };
+        // (vertical, horizontal): exactly axis-aligned on the design grid. A short piece of a curve
+        // that merely moves less than a device pixel sideways must NOT count: snapping each of those
+        // turns arcs (the wrench head, round caps) into a staircase at small sizes.
+        let seg = |i: usize, j: usize| ((pts[i].0 - pts[j].0).abs() < 1e-4, (pts[i].1 - pts[j].1).abs() < 1e-4);
         (0..n)
             .map(|i| {
                 let mut nb = Vec::new();
@@ -205,7 +204,56 @@ impl Pen16<'_> {
     }
     fn fill(&self, pts: &[(f32, f32)]) {
         let v: Vec<Pos2> = pts.iter().map(|(x, y)| self.p(*x, *y)).collect();
-        self.painter.add(PathShape::convex_polygon(v, self.color, Stroke::NONE));
+        if is_convex(&v) {
+            self.painter.add(PathShape::convex_polygon(v, self.color, Stroke::NONE));
+        } else {
+            self.fill_concave(&v);
+        }
+    }
+    /// Fill a concave polygon (the pointer arrow, a four-pointed star): `convex_polygon` smears
+    /// those, worst at small sizes. Ear-clipped triangles, with a half-pixel anti-aliasing fringe
+    /// around the outline (the same edge softness a convex fill gets).
+    fn fill_concave(&self, v: &[Pos2]) {
+        let n = v.len();
+        if n < 3 {
+            return;
+        }
+        let px = 1.0 / self.painter.pixels_per_point();
+        let area: f32 = (0..n).map(|i| v[i].x * v[(i + 1) % n].y - v[(i + 1) % n].x * v[i].y).sum();
+        let sign = if area < 0.0 { -1.0 } else { 1.0 };
+        let normal = |a: Pos2, b: Pos2| {
+            let d = b - a;
+            let len = d.length();
+            if len > 1e-6 { vec2(d.y, -d.x) * (sign / len) } else { vec2(0.0, 0.0) }
+        };
+        let mut mesh = egui::epaint::Mesh::default();
+        let mut outer = Vec::with_capacity(n);
+        for k in 0..n {
+            let (prev, cur, next) = (v[(k + n - 1) % n], v[k], v[(k + 1) % n]);
+            let (n0, n1) = (normal(prev, cur), normal(cur, next));
+            let m = n0 + n1;
+            let off = if m.length() > 1e-6 {
+                let dir = m.normalized();
+                dir * (0.5 * px / dir.dot(n0).max(0.5))
+            } else {
+                vec2(0.0, 0.0)
+            };
+            mesh.colored_vertex(cur - off, self.color);
+            outer.push(cur + off);
+        }
+        for o in outer {
+            mesh.colored_vertex(o, Color32::TRANSPARENT);
+        }
+        for t in triangulate(v) {
+            mesh.add_triangle(t[0] as u32, t[1] as u32, t[2] as u32);
+        }
+        for k in 0..n {
+            let j = (k + 1) % n;
+            let (a, b, c, d) = (k as u32, j as u32, (n + j) as u32, (n + k) as u32);
+            mesh.add_triangle(a, b, c);
+            mesh.add_triangle(a, c, d);
+        }
+        self.painter.add(egui::Shape::mesh(mesh));
     }
     fn circle(&self, x: f32, y: f32, r: f32) {
         self.painter.circle_stroke(self.p(x, y), r * self.s(), Stroke::new(self.stroke_w(), self.color));
@@ -267,6 +315,65 @@ impl Pen16<'_> {
         let rc = Rect::from_min_max(self.p(x0, y0), self.p(x1, y1));
         self.painter.rect_filled(rc, ((x1 - x0).min(y1 - y0)) * 0.5 * self.s(), self.color);
     }
+}
+
+/// Is the polygon convex (every turn the same way)?
+fn is_convex(v: &[Pos2]) -> bool {
+    let n = v.len();
+    let mut sign = 0.0_f32;
+    for i in 0..n {
+        let (a, b, c) = (v[i], v[(i + 1) % n], v[(i + 2) % n]);
+        let cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if cr.abs() < 1e-6 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = cr.signum();
+        } else if cr.signum() != sign {
+            return false;
+        }
+    }
+    true
+}
+
+/// Is `p` inside (or on the edge of) triangle `abc`?
+fn in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
+    let side = |p1: Pos2, p2: Pos2, p3: Pos2| (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+    let (d1, d2, d3) = (side(p, a, b), side(p, b, c), side(p, c, a));
+    !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+}
+
+/// Ear clipping: triangles (vertex indices) covering a simple polygon. Degenerate input falls back
+/// to a fan, so it always terminates and never panics.
+fn triangulate(v: &[Pos2]) -> Vec<[usize; 3]> {
+    let n = v.len();
+    let mut tris = Vec::new();
+    if n < 3 {
+        return tris;
+    }
+    let area: f32 = (0..n).map(|i| v[i].x * v[(i + 1) % n].y - v[(i + 1) % n].x * v[i].y).sum();
+    let positive = area >= 0.0;
+    let mut idx: Vec<usize> = (0..n).collect();
+    while idx.len() > 3 {
+        let m = idx.len();
+        let ear = (0..m).find(|&k| {
+            let (i0, i1, i2) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
+            let (a, b, c) = (v[i0], v[i1], v[i2]);
+            let cr = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            cr != 0.0 && (cr > 0.0) == positive && !idx.iter().any(|&j| j != i0 && j != i1 && j != i2 && in_triangle(v[j], a, b, c))
+        });
+        let Some(k) = ear else { break };
+        tris.push([idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]]);
+        idx.remove(k);
+    }
+    if idx.len() == 3 {
+        tris.push([idx[0], idx[1], idx[2]]);
+    } else {
+        for k in 1..idx.len().saturating_sub(1) {
+            tris.push([idx[0], idx[k], idx[k + 1]]);
+        }
+    }
+    tris
 }
 
 /// Catmull-Rom spline through `pts`, flattened to line segments (fewer than three points: as is).
@@ -1038,6 +1145,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A concave shape (the pointer arrow) is split into triangles that cover exactly its area:
+    /// `convex_polygon` smeared it, worst at small sizes.
+    #[test]
+    fn concave_arrow_is_triangulated_to_its_exact_area() {
+        let arrow: Vec<Pos2> = [(4.6, 3.2), (4.6, 12.0), (6.9, 9.9), (8.9, 13.8), (10.1, 13.2), (8.2, 9.3), (11.4, 9.1)].iter().map(|&(x, y)| pos2(x, y)).collect();
+        assert!(!is_convex(&arrow));
+        let tris = triangulate(&arrow);
+        assert_eq!(tris.len(), arrow.len() - 2);
+        let tri_area = |t: &[usize; 3]| {
+            let (a, b, c) = (arrow[t[0]], arrow[t[1]], arrow[t[2]]);
+            ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs() / 2.0
+        };
+        let n = arrow.len();
+        let poly: f32 = (0..n).map(|i| arrow[i].x * arrow[(i + 1) % n].y - arrow[(i + 1) % n].x * arrow[i].y).sum::<f32>().abs() / 2.0;
+        let sum: f32 = tris.iter().map(tri_area).sum();
+        assert!((poly - sum).abs() < 1e-3, "polygon {poly} vs triangles {sum}");
+        assert!(is_convex(&[pos2(0.0, 0.0), pos2(4.0, 0.0), pos2(4.0, 3.0), pos2(0.0, 3.0)]));
     }
 
     /// The panel menu mark (≡): three lines, the same two gaps, at every scale.
