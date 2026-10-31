@@ -322,7 +322,12 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 if crate::panels::audio_fx_editor::has_editor(&e.effect) {
                     custom_setup_row(app, bui, body, &lane, clip, idx, &e.effect);
                 }
+                let tracking = e.effect == filmcraft_engine::motion_track::EFFECT;
                 for pd in &def.params {
+                    // Tracking Motion keeps its attached clips in a text parameter; its own rows show them
+                    if tracking && pd.id == "links" {
+                        continue;
+                    }
                     param_row(app, bui, body, clip, idx, e, None, pd, mt_now, &mut actions, &lane, &lx, it, &mut keys);
                     if app.ui.expanded_fx.contains(&graph_key(clip, idx, pd.id))
                         && let Some(param) = e.params.get(pd.id)
@@ -331,6 +336,9 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     {
                         graph_rows(app, bui, body, clip, idx, None, pd, param, &lane, it, &mut actions);
                     }
+                }
+                if tracking {
+                    tracking_rows(app, bui, body, &lane, clip, idx, e, it, &mut actions);
                 }
                 if crate::panels::masks::maskable(e) {
                     crate::panels::masks::effect_rows(app, bui, body, clip, idx, e, mt_now, &mut actions, &lane, &lx, it, &mut keys);
@@ -421,6 +429,99 @@ fn custom_setup_row(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane:
     app.auto.add(&format!("effectControls.effect.{effect}.edit"), br, "Edit…");
     if resp.clicked() {
         crate::panels::audio_fx_editor::open(app, crate::panels::audio_fx_editor::FxTarget::Clip { clip: clip.0, index: idx });
+    }
+}
+
+/// A label row of the Tracking Motion block, drawn like a parameter row; returns its rect.
+fn tracking_row(app: &FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &Rect, label: &str) -> Rect {
+    let t = app.tokens;
+    let (r, _) = ui.allocate_exact_size(vec2(body.width(), ROW_H), Sense::hover());
+    row_line(ui, r, lane, &t);
+    ui.painter().text(pos2(r.min.x + 42.0, r.center().y), Align2::LEFT_CENTER, label, Tokens::ui(12.0), t.text_dim);
+    r
+}
+
+/// A small text button inside a row (`x` from the row's left edge); true when clicked.
+#[allow(clippy::too_many_arguments)]
+fn row_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, r: Rect, x: f32, w: f32, id: egui::Id, label: &str, auto_id: &str) -> (bool, egui::Response) {
+    let t = app.tokens;
+    let br = Rect::from_min_size(pos2(r.min.x + x, r.min.y + 2.0), vec2(w, ROW_H - 4.0));
+    let resp = ui.interact(br, id, Sense::click());
+    ui.painter().rect_filled(br, 3.0, if resp.hovered() { t.hover } else { t.field_bg });
+    ui.painter().rect_stroke(br, 3.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
+    ui.painter().text(br.center(), Align2::CENTER_CENTER, label, Tokens::ui(11.5), t.text);
+    app.auto.add(auto_id, br, label);
+    (resp.clicked(), resp)
+}
+
+/// The Tracking Motion block under the effect's parameters: set up the region (Auto picks the most
+/// trackable patch of the frame, Manual a box to place yourself), the tracking buttons, and the
+/// clips (text, images…) that follow the track.
+#[allow(clippy::too_many_arguments)]
+fn tracking_rows(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &Rect, clip: ClipId, idx: usize, e: &EffectInstance, it: &TrackItem, actions: &mut Vec<(String, Value)>) {
+    let t = app.tokens;
+    let base = "effectControls.tracking_motion";
+    // 1. the region
+    let r = tracking_row(app, ui, body, lane, &tl!("Tracking Region"));
+    let label = if e.masks.is_empty() { tl!("Create Region") } else { tl!("Reset Region") };
+    let (clicked, _) = row_button(app, ui, r, 160.0, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx)), &label, &format!("{base}.setup"));
+    if clicked {
+        actions.push(("tracking.setup".into(), json!({"clip": clip.0, "effect": idx, "reset": true})));
+    }
+    // 2. tracking: the Mask Path buttons (backward / forward, one frame or all)
+    if !e.masks.is_empty() {
+        let r = tracking_row(app, ui, body, lane, &tl!("Track"));
+        let mut vui = ui.new_child(
+            egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(r.min.x + 160.0, r.min.y + 1.0), pos2(r.max.x - 26.0, r.max.y - 1.0))).layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        crate::panels::masks::path_value(app, &mut vui, clip, idx, Some(0), actions);
+    }
+    // 3. clips that follow the track
+    let attached = filmcraft_engine::motion_track::attached(e);
+    let (mut names, mut cands): (Vec<(ClipId, String)>, Vec<(ClipId, String)>) = (Vec::new(), Vec::new());
+    if let Some(seq) = app.session.active_sequence() {
+        for c in seq.video_tracks.iter().flat_map(|tr| tr.items.iter()).filter(|c| c.id != clip) {
+            if attached.contains(&c.id) {
+                names.push((c.id, c.name.clone()));
+            } else if c.start < it.end() && c.end() > it.start {
+                cands.push((c.id, c.name.clone()));
+            }
+        }
+    }
+    let r = tracking_row(app, ui, body, lane, &tl!("Attached Clips"));
+    let (_, resp) = row_button(app, ui, r, 160.0, 96.0, egui::Id::unique(("fx-track-attach", clip.0, idx)), &tl!("Attach Clip…"), &format!("{base}.attach"));
+    egui::Popup::menu(&resp).show(|ui| {
+        if e.masks.first().is_none_or(|m| !m.path.is_animated()) {
+            ui.label(egui::RichText::new(tl!("Track the region first")).color(t.text_dim));
+        } else if cands.is_empty() {
+            ui.label(egui::RichText::new(tl!("No other clip overlaps this one")).color(t.text_dim));
+        }
+        for (id, name) in cands.iter().take(40).filter(|_| e.masks.first().is_some_and(|m| m.path.is_animated())) {
+            if ui.button(name).clicked() {
+                actions.push(("tracking.attach".into(), json!({"clip": clip.0, "effect": idx, "follower": id.0})));
+                ui.close();
+            }
+        }
+    });
+    if !names.is_empty() {
+        let (clicked, _) = row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-update", clip.0, idx)), &tl!("Update"), &format!("{base}.update"));
+        if clicked {
+            actions.push(("tracking.update".into(), json!({"clip": clip.0, "effect": idx})));
+        }
+    }
+    for (id, name) in names {
+        let r = tracking_row(app, ui, body, lane, "");
+        ui.painter().with_clip_rect(Rect::from_min_max(pos2(r.min.x + 42.0, r.min.y), pos2(r.min.x + 250.0, r.max.y))).text(
+            pos2(r.min.x + 56.0, r.center().y),
+            Align2::LEFT_CENTER,
+            &name,
+            Tokens::ui(12.0),
+            t.text,
+        );
+        let (clicked, _) = row_button(app, ui, r, 264.0, 64.0, egui::Id::unique(("fx-track-detach", clip.0, idx, id.0)), &tl!("Detach"), &format!("{base}.detach.{}", id.0));
+        if clicked {
+            actions.push(("tracking.detach".into(), json!({"clip": clip.0, "effect": idx, "follower": id.0})));
+        }
     }
 }
 

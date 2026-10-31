@@ -247,6 +247,9 @@ const NOISE: &[&str] = &["Video Effects", "Noise & Grain"];
 const PERSPECTIVE: &[&str] = &["Video Effects", "Perspective"];
 const STYLIZE: &[&str] = &["Video Effects", "Stylize"];
 const TRANSFORM: &[&str] = &["Video Effects", "Transform"];
+/// Fork addition: effects that exist outside Premiere's catalogue (kept out of "Video Effects" so the
+/// parity checks on that folder stay exact).
+const TRACKING: &[&str] = &["Tracking"];
 const VIDEO: &[&str] = &["Video Effects", "Video"];
 const A_AMP: &[&str] = &["Audio Effects", "Amplitude and Compression"];
 const A_DELAY: &[&str] = &["Audio Effects", "Delay and Echo"];
@@ -600,6 +603,18 @@ fn build_effects() -> Vec<EffectDef> {
                 f("bottom", "Bottom", 0.0, 0.0, 100.0, "%"),
                 b("zoom", "Zoom", false),
                 fs("feather", "Edge Feather", 0.0, (0.0, 1000.0), (0.0, 100.0), "", 0),
+            ],
+        ),
+        // Data-only effect (renders nothing): its mask is the tracked region and `links` lists the
+        // clips (text, images…) that follow it, see `filmcraft_engine::motion_track`.
+        video(
+            "tracking_motion",
+            "Tracking Motion",
+            TRACKING,
+            vec![
+                ch("mode", "Region", &["Auto", "Manual"], 0),
+                ch("method", "Follow", &["Position", "Position & Rotation", "Position, Scale & Rotation"], 2),
+                txt("links", "Attached Clips"),
             ],
         ),
         video("horizontal_flip", "Horizontal Flip", TRANSFORM, vec![]),
