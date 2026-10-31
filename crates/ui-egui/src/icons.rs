@@ -394,9 +394,7 @@ fn smooth(pts: &[(f32, f32)], closed: bool) -> Vec<(f32, f32)> {
         for k in 0..8 {
             let t = k as f32 / 8.0;
             let (t2, t3) = (t * t, t * t * t);
-            let f = |a: f32, b: f32, c: f32, d: f32| {
-                0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3)
-            };
+            let f = |a: f32, b: f32, c: f32, d: f32| 0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3);
             out.push((f(p0.0, p1.0, p2.0, p3.0), f(p0.1, p1.1, p2.1, p3.1)));
         }
     }
@@ -426,8 +424,10 @@ fn along_diagonal(origin: (f32, f32), pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
 /// A capsule (two half circles joined by straight sides) centred on `c`, its long axis running up
 /// and to the right: one link of a chain.
 fn capsule(c: (f32, f32), half: f32, r: f32) -> Vec<(f32, f32)> {
-    let mut pts: Vec<(f32, f32)> = arc_pts(-half, 0.0, r, 90.0, 270.0, 10);
-    pts.extend(arc_pts(half, 0.0, r, -90.0, 90.0, 10));
+    // 9 steps (20 degrees), not 10: at 18 degrees a chord of the rotated arc is exactly horizontal or
+    // vertical, and such a sub-pixel chord snaps to the pixel grid unevenly at small sizes.
+    let mut pts: Vec<(f32, f32)> = arc_pts(-half, 0.0, r, 90.0, 270.0, 9);
+    pts.extend(arc_pts(half, 0.0, r, -90.0, 90.0, 9));
     along_diagonal(c, &pts)
 }
 
@@ -518,11 +518,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.pill(6.5, 2.4, 8.2, 9.5);
             pen.pill(8.4, 2.8, 10.1, 9.5);
             pen.pill(10.3, 4.4, 12.0, 9.5);
-            pen.painter.rect_filled(
-                Rect::from_min_max(pen.p(4.6, 7.0), pen.p(12.0, 13.8)),
-                3.0 * pen.s(),
-                color,
-            );
+            pen.painter.rect_filled(Rect::from_min_max(pen.p(4.6, 7.0), pen.p(12.0, 13.8)), 3.0 * pen.s(), color);
             pen.fill(&capsule((12.4, 9.6), 2.0, 0.9));
         }
         Zoom => {
@@ -550,15 +546,39 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.fill(&[(3.5, 3.5), (10.0, 8.0), (3.5, 12.5)]);
         }
         GoToIn => {
-            pen.curve(&[(5.0, 3.0), (3.8, 3.2), (3.3, 4.2), (3.3, 6.2), (2.8, 7.4), (2.0, 8.0), (2.8, 8.6), (3.3, 9.8), (3.3, 11.8), (3.8, 12.8), (5.0, 13.0)], false);
+            pen.curve(
+                &[(5.0, 3.0), (3.8, 3.2), (3.3, 4.2), (3.3, 6.2), (2.8, 7.4), (2.0, 8.0), (2.8, 8.6), (3.3, 9.8), (3.3, 11.8), (3.8, 12.8), (5.0, 13.0)],
+                false,
+            );
             pen.fill(&[(13.0, 3.5), (6.0, 8.0), (13.0, 12.5)]);
         }
         GoToOut => {
-            pen.curve(&[(11.0, 3.0), (12.2, 3.2), (12.7, 4.2), (12.7, 6.2), (13.2, 7.4), (14.0, 8.0), (13.2, 8.6), (12.7, 9.8), (12.7, 11.8), (12.2, 12.8), (11.0, 13.0)], false);
+            pen.curve(
+                &[
+                    (11.0, 3.0),
+                    (12.2, 3.2),
+                    (12.7, 4.2),
+                    (12.7, 6.2),
+                    (13.2, 7.4),
+                    (14.0, 8.0),
+                    (13.2, 8.6),
+                    (12.7, 9.8),
+                    (12.7, 11.8),
+                    (12.2, 12.8),
+                    (11.0, 13.0),
+                ],
+                false,
+            );
             pen.fill(&[(3.0, 3.5), (10.0, 8.0), (3.0, 12.5)]);
         }
-        MarkIn => pen.curve(&[(10.5, 2.5), (8.2, 2.8), (7.0, 4.5), (7.0, 6.6), (6.2, 7.6), (5.0, 8.0), (6.2, 8.4), (7.0, 9.4), (7.0, 11.5), (8.2, 13.2), (10.5, 13.5)], false),
-        MarkOut => pen.curve(&[(5.5, 2.5), (7.8, 2.8), (9.0, 4.5), (9.0, 6.6), (9.8, 7.6), (11.0, 8.0), (9.8, 8.4), (9.0, 9.4), (9.0, 11.5), (7.8, 13.2), (5.5, 13.5)], false),
+        MarkIn => pen.curve(
+            &[(10.5, 2.5), (8.2, 2.8), (7.0, 4.5), (7.0, 6.6), (6.2, 7.6), (5.0, 8.0), (6.2, 8.4), (7.0, 9.4), (7.0, 11.5), (8.2, 13.2), (10.5, 13.5)],
+            false,
+        ),
+        MarkOut => pen.curve(
+            &[(5.5, 2.5), (7.8, 2.8), (9.0, 4.5), (9.0, 6.6), (9.8, 7.6), (11.0, 8.0), (9.8, 8.4), (9.0, 9.4), (9.0, 11.5), (7.8, 13.2), (5.5, 13.5)],
+            false,
+        ),
         Marker => pen.fill(&[(4.0, 2.5), (12.0, 2.5), (12.0, 9.5), (8.0, 13.5), (4.0, 9.5)]),
         Insert => {
             pen.rect(2.0, 5.0, 14.0, 13.0);
@@ -583,7 +603,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(9.5, 10.75), (10.5, 10.75)]);
         }
         Camera => {
-            pen.closed(&[(2.0, 5.0), (5.0, 5.0), (6.0, 3.5), (10.0, 3.5), (11.0, 5.0), (14.0, 5.0), (14.0, 12.5), (2.0, 12.5)]);
+            pen.closed(&[(2.0, 5.0), (4.0, 5.0), (6.0, 3.5), (10.0, 3.5), (12.0, 5.0), (14.0, 5.0), (14.0, 12.5), (2.0, 12.5)]);
             pen.circle(8.0, 8.7, 2.3);
         }
         Loop => {
@@ -696,8 +716,8 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Trash => {
             pen.line(&[(2.5, 4.0), (13.5, 4.0)]);
-            pen.line(&[(6.0, 4.0), (6.5, 2.5), (9.5, 2.5), (10.0, 4.0)]);
-            pen.closed(&[(3.8, 4.0), (12.2, 4.0), (11.4, 14.0), (4.6, 14.0)]);
+            pen.line(&[(5.0, 4.0), (6.5, 2.5), (9.5, 2.5), (11.0, 4.0)]);
+            pen.closed(&[(4.0, 4.0), (12.0, 4.0), (10.0, 14.0), (6.0, 14.0)]);
         }
         Home => {
             pen.line(&[(1.5, 8.0), (8.0, 2.0), (14.5, 8.0)]);
@@ -1151,7 +1171,8 @@ mod tests {
     /// `convex_polygon` smeared it, worst at small sizes.
     #[test]
     fn concave_arrow_is_triangulated_to_its_exact_area() {
-        let arrow: Vec<Pos2> = [(4.6, 3.2), (4.6, 12.0), (6.9, 9.9), (8.9, 13.8), (10.1, 13.2), (8.2, 9.3), (11.4, 9.1)].iter().map(|&(x, y)| pos2(x, y)).collect();
+        let arrow: Vec<Pos2> =
+            [(4.6, 3.2), (4.6, 12.0), (6.9, 9.9), (8.9, 13.8), (10.1, 13.2), (8.2, 9.3), (11.4, 9.1)].iter().map(|&(x, y)| pos2(x, y)).collect();
         assert!(!is_convex(&arrow));
         let tris = triangulate(&arrow);
         assert_eq!(tris.len(), arrow.len() - 2);

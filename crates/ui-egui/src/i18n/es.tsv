@@ -3634,3 +3634,20 @@
 	The control server is disabled: FILMCRAFT_CONTROL_TOKEN must contain 64 random hex characters (see docs/control-protocol.md)	El servidor de control está desactivado: FILMCRAFT_CONTROL_TOKEN debe contener 64 caracteres hexadecimales aleatorios (ver docs/control-protocol.md)
 
 # Control server: the bind-failure notice (port collisions; #3318 may show it too).
+
+# Tracking Motion (Effects > Motion Tracking, Effect Controls)
+	Tracking Motion	Seguimiento de movimiento
+	Motion Tracking	Seguimiento de movimiento
+	Tracking Region	Región de seguimiento
+	Auto Region	Región automática
+	Manual Region	Región manual
+	Region	Región
+	Follow	Seguir
+	Manual	Manual
+	Track	Seguir
+	Attached Clips	Clips vinculados
+	Attach Clip…	Vincular clip…
+	Track the region first	Primero haz el seguimiento de la región
+	No other clip overlaps this one	Ningún otro clip se superpone con este
+	Update	Actualizar
+	Detach	Desvincular

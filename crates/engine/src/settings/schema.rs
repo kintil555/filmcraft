@@ -526,10 +526,7 @@ pub(super) static CATEGORIES: &[Category] = &[
     Category {
         id: "plugins",
         title: "Plugins",
-        rows: &[
-            Row::Group("Plugins", &[b("plugins.developerMode", "Enable developer mode", false)]),
-            Row::Custom("pluginList"),
-        ],
+        rows: &[Row::Group("Plugins", &[b("plugins.developerMode", "Enable developer mode", false)]), Row::Custom("pluginList")],
     },
     Category {
         id: "timeline",

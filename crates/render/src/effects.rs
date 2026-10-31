@@ -360,7 +360,7 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             }
             *img = g;
         }
-        "glow" => {
+        "bloom" => {
             let c = color(e, "color", cx);
             let th = f(e, "threshold", cx) / 100.0;
             let rad = f(e, "radius", cx) * cx.px_scale * 0.5;
@@ -403,13 +403,9 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             let shifted = img.transformed(img.w, img.h, &Affine::translate(dx, dy));
             // m = a * (1 - a_shifted): the sliver of the clip that the shifted copy leaves uncovered
             let mut hl = Image::new(img.w, img.h);
-            hl.px
-                .par_chunks_mut(4)
-                .zip(img.px.par_chunks(4))
-                .zip(shifted.px.par_chunks(4))
-                .for_each(|((h, s), t)| {
-                    h[3] = (s[3] * (1.0 - t[3])).clamp(0.0, 1.0);
-                });
+            hl.px.par_chunks_mut(4).zip(img.px.par_chunks(4)).zip(shifted.px.par_chunks(4)).for_each(|((h, s), t)| {
+                h[3] = (s[3] * (1.0 - t[3])).clamp(0.0, 1.0);
+            });
             if soft > 0.3 {
                 gaussian(&mut hl, soft, soft, false);
             }

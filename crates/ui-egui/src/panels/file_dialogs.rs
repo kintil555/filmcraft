@@ -63,23 +63,25 @@ impl NewProjectForm {
     /// Pick a ratio preset: the width stays, the height follows (rounded to an even number).
     pub fn set_ratio(&mut self, idx: usize) {
         self.ratio = idx.min(NEW_RATIO_CUSTOM);
-        if let Some(&(_, rw, rh)) = NEW_RATIOS.get(self.ratio) {
-            if rw > 0 && rh > 0 {
-                let h = u64::from(self.width) * u64::from(rh) / u64::from(rw);
-                let h = u32::try_from(h).unwrap_or(NEW_SIDE_MAX);
-                self.height = (h / 2 * 2).clamp(NEW_SIDE_MIN, NEW_SIDE_MAX);
-            }
+        if let Some(&(_, rw, rh)) = NEW_RATIOS.get(self.ratio)
+            && rw > 0
+            && rh > 0
+        {
+            let h = u64::from(self.width) * u64::from(rh) / u64::from(rw);
+            let h = u32::try_from(h).unwrap_or(NEW_SIDE_MAX);
+            self.height = (h / 2 * 2).clamp(NEW_SIDE_MIN, NEW_SIDE_MAX);
         }
     }
 
     /// The height was typed while a ratio preset is active: the width follows (rounded to an even number).
     pub fn set_height_keep_ratio(&mut self) {
-        if let Some(&(_, rw, rh)) = NEW_RATIOS.get(self.ratio) {
-            if rw > 0 && rh > 0 {
-                let w = u64::from(self.height) * u64::from(rw) / u64::from(rh);
-                let w = u32::try_from(w).unwrap_or(NEW_SIDE_MAX);
-                self.width = (w / 2 * 2).clamp(NEW_SIDE_MIN, NEW_SIDE_MAX);
-            }
+        if let Some(&(_, rw, rh)) = NEW_RATIOS.get(self.ratio)
+            && rw > 0
+            && rh > 0
+        {
+            let w = u64::from(self.height) * u64::from(rw) / u64::from(rh);
+            let w = u32::try_from(w).unwrap_or(NEW_SIDE_MAX);
+            self.width = (w / 2 * 2).clamp(NEW_SIDE_MIN, NEW_SIDE_MAX);
         }
     }
 
@@ -243,7 +245,7 @@ pub fn show_new_project(app: &mut FilmcraftApp, ctx: &egui::Context) {
     let t = app.tokens;
     let focus = std::mem::take(&mut app.file_dialogs.home_new_focus);
     let (mut create, mut cancel) = (false, false);
-    let r = egui::Modal::new(egui::Id::new("home-new-project-modal")).frame(modal_frame(&t)).show(ctx, |ui| {
+    let r = egui::Modal::new(egui::Id::unique("home-new-project-modal")).frame(modal_frame(&t)).show(ctx, |ui| {
         ui.set_width(440.0);
         Frame::new().inner_margin(Margin { left: 28, right: 28, top: 24, bottom: 20 }).show(ui, |ui| {
             ui.label(RichText::new(tl!("New Project")).size(18.0).strong().color(t.text));

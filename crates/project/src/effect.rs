@@ -247,6 +247,12 @@ const NOISE: &[&str] = &["Video Effects", "Noise & Grain"];
 const PERSPECTIVE: &[&str] = &["Video Effects", "Perspective"];
 const STYLIZE: &[&str] = &["Video Effects", "Stylize"];
 const TRANSFORM: &[&str] = &["Video Effects", "Transform"];
+/// Fork addition: effects that exist outside Premiere's catalogue (kept out of "Video Effects" so the
+/// parity checks on that folder stay exact).
+const TRACKING: &[&str] = &["Motion Tracking"];
+/// Fork addition: the video effects that sit in Premiere's folders but are not part of its catalogue.
+/// The catalogue parity checks leave them out.
+pub const FORK_VIDEO_EFFECTS: &[&str] = &["inner_highlight", "inner_shadow", "outer_glow", "bloom"];
 const VIDEO: &[&str] = &["Video Effects", "Video"];
 const A_AMP: &[&str] = &["Audio Effects", "Amplitude and Compression"];
 const A_DELAY: &[&str] = &["Audio Effects", "Delay and Echo"];
@@ -602,6 +608,18 @@ fn build_effects() -> Vec<EffectDef> {
                 fs("feather", "Edge Feather", 0.0, (0.0, 1000.0), (0.0, 100.0), "", 0),
             ],
         ),
+        // Data-only effect (renders nothing): its mask is the tracked region and `links` lists the
+        // clips (text, images…) that follow it, see `filmcraft_engine::motion_track`.
+        video(
+            "tracking_motion",
+            "Tracking Motion",
+            TRACKING,
+            vec![
+                ch("mode", "Region", &["Auto", "Manual"], 0),
+                ch("method", "Follow", &["Position", "Position & Rotation", "Position, Scale & Rotation"], 2),
+                txt("links", "Attached Clips"),
+            ],
+        ),
         video("horizontal_flip", "Horizontal Flip", TRANSFORM, vec![]),
         video("vertical_flip", "Vertical Flip", TRANSFORM, vec![]),
         video("edge_feather", "Edge Feather", vfx::LEGACY, vec![fs("amount", "Amount", 0.0, (0.0, 100.0), (0.0, 100.0), "", 0)]),
@@ -716,8 +734,9 @@ fn build_effects() -> Vec<EffectDef> {
                 b("only", "Glow Only", false),
             ],
         ),
+        // id `bloom`: `glow` is the Glow transition's id and ids are unique across effects and transitions
         video(
-            "glow",
+            "bloom",
             "Glow",
             STYLIZE,
             vec![

@@ -346,10 +346,11 @@ fn saved_projects_are_listed_in_home_and_open_recent() {
     assert_eq!(d.app().session.prefs.general.recent_projects, [a.clone(), b.clone()]);
     // Home lists them too, newest first, and a click opens one
     d.click("header.home");
-    let rows = d.ok("ui.elements", json!({"prefix": "import.recent."}));
-    let rows: Vec<&str> = rows.as_array().unwrap().iter().map(|e| e["label"].as_str().unwrap()).collect();
+    let rows = d.ok("ui.elements", json!({"prefix": "home.recent."}));
+    let rows: Vec<&str> =
+        rows.as_array().unwrap().iter().filter(|e| e["id"].as_str().is_some_and(|id| !id.ends_with(".remove"))).map(|e| e["label"].as_str().unwrap()).collect();
     assert_eq!(rows, ["first cut.fcproj", "second cut.fcproj"]);
-    d.click("import.recent.1");
+    d.click("home.recent.1");
     assert_eq!(d.app().session.path.as_deref(), Some(b.as_str()));
     // Clear Recent Files empties both lists
     d.menu("file.clearRecent");

@@ -52,7 +52,7 @@ fn file_info(path: &str) -> FileInfo {
 
 /// The cached file info for `paths`, refreshed when the list changed or the cache is stale.
 fn recent_info(ctx: &egui::Context, paths: &[String]) -> Vec<FileInfo> {
-    let id = egui::Id::new("home-recent-cache");
+    let id = egui::Id::unique("home-recent-cache");
     let now = ctx.input(|i| i.time);
     let cache: RecentCache = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
     if cache.paths == paths && cache.info.len() == paths.len() && now - cache.at < REFRESH_SECS {
@@ -98,7 +98,7 @@ fn size_text(bytes: u64) -> String {
 /// A rounded button at `r`; returns whether it was clicked.
 fn pill(app: &mut FilmcraftApp, ui: &mut egui::Ui, id: &str, r: Rect, label: &str, primary: bool) -> bool {
     let t = app.tokens;
-    let resp = ui.interact(r, egui::Id::new(("home", id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = ui.interact(r, egui::Id::unique(("home", id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     app.auto.add(id, r, label);
     let (bg, fg) = if primary {
         (if resp.hovered() { t.accent_hover } else { t.accent }, Color32::WHITE)
@@ -171,7 +171,7 @@ fn sidebar(app: &mut FilmcraftApp, ui: &mut egui::Ui, side: Rect) {
     }
 
     let open = Rect::from_min_size(pos2(x, side.min.y + 58.0), vec2(w, 28.0));
-    let resp = ui.interact(open, egui::Id::new(("home", "home.open")), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = ui.interact(open, egui::Id::unique(("home", "home.open")), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     app.auto.add("home.open", open, tl!("Open Project"));
     if resp.hovered() {
         ui.painter().rect_filled(open, 4.0, t.hover);
@@ -303,7 +303,7 @@ fn recent_table(app: &mut FilmcraftApp, ui: &mut egui::Ui, main: Rect, top: f32)
             }
             p.text(pos2(c_type, cy), Align2::LEFT_CENTER, tl!("FilmCraft Project"), Tokens::ui(12.0), ink);
             let x_btn = Rect::from_center_size(pos2(row.max.x - 14.0, cy), vec2(20.0, 20.0));
-            let x_resp = ui.interact(x_btn, egui::Id::new(("home", "recent-x", i)), Sense::click());
+            let x_resp = ui.interact(x_btn, egui::Id::unique(("home", "recent-x", i)), Sense::click());
             app.auto.add(&format!("home.recent.{i}.remove"), x_btn, tl!("Remove from list"));
             if resp.hovered() || x_resp.hovered() {
                 let stroke = Stroke::new(1.5, if x_resp.hovered() { t.text } else { t.text_dim });

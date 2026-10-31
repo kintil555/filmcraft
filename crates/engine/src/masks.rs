@@ -785,7 +785,10 @@ pub fn poll(s: &mut Session) {
         }
         let total = lock(&s.mask_jobs[i].keys).len();
         if finished && s.mask_jobs[i].applied >= total {
+            let target = s.mask_jobs[i].target;
             s.mask_jobs.remove(i);
+            // clips attached to a Tracking Motion region follow the new track
+            crate::motion_track::on_track_finished(s, target);
             continue;
         }
         i += 1;
