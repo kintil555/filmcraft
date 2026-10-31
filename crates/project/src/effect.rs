@@ -250,6 +250,9 @@ const TRANSFORM: &[&str] = &["Video Effects", "Transform"];
 /// Fork addition: effects that exist outside Premiere's catalogue (kept out of "Video Effects" so the
 /// parity checks on that folder stay exact).
 const TRACKING: &[&str] = &["Motion Tracking"];
+/// Fork addition: the video effects that sit in Premiere's folders but are not part of its catalogue.
+/// The catalogue parity checks leave them out.
+pub const FORK_VIDEO_EFFECTS: &[&str] = &["inner_highlight", "inner_shadow", "outer_glow", "bloom"];
 const VIDEO: &[&str] = &["Video Effects", "Video"];
 const A_AMP: &[&str] = &["Audio Effects", "Amplitude and Compression"];
 const A_DELAY: &[&str] = &["Audio Effects", "Delay and Echo"];
@@ -731,8 +734,9 @@ fn build_effects() -> Vec<EffectDef> {
                 b("only", "Glow Only", false),
             ],
         ),
+        // id `bloom`: `glow` is the Glow transition's id and ids are unique across effects and transitions
         video(
-            "glow",
+            "bloom",
             "Glow",
             STYLIZE,
             vec![

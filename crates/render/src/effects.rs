@@ -360,7 +360,7 @@ pub fn apply(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
             }
             *img = g;
         }
-        "glow" => {
+        "bloom" => {
             let c = color(e, "color", cx);
             let th = f(e, "threshold", cx) / 100.0;
             let rad = f(e, "radius", cx) * cx.px_scale * 0.5;

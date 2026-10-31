@@ -134,7 +134,14 @@ impl FilmcraftApp {
             // reopen the workspace in use when the app last closed
             self.workspace_restored = true;
             if let Some(w) = dock::find(&self.workspaces, &self.workspaces.current) {
+                let remembered = self.layout_state().filter(|(name, _)| *name == w);
                 self.set_workspace(&w);
+                if let Some((_, layout)) = remembered {
+                    // the layout it was left in, changed after it was last saved
+                    self.ui.dock = layout;
+                    self.persisted_dock = Some(self.ui.dock.clone());
+                    self.save_layout_state();
+                }
             }
         }
         self.applied_prefs = Some(p);

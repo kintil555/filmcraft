@@ -478,6 +478,10 @@ fn tracking_rows(
         let (clicked, _) = row_button(app, ui, r, x, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx, mode)), label, &format!("{base}.setup.{mode}"));
         if clicked {
             actions.push(("tracking.setup".into(), json!({"clip": clip.0, "effect": idx, "mode": mode, "reset": true})));
+            if mode == "auto" {
+                // Auto follows the region on its own from the playhead; Manual waits for the box to be placed
+                actions.push(("masks.track".into(), json!({"clip": clip.0, "effect": idx, "mask": 0, "direction": "forward"})));
+            }
         }
     }
     // 2. tracking: the Mask Path buttons (backward / forward, one frame or all)
