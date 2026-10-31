@@ -463,10 +463,12 @@ fn tracking_rows(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect, lane: &R
     let base = "effectControls.tracking_motion";
     // 1. the region
     let r = tracking_row(app, ui, body, lane, &tl!("Tracking Region"));
-    let label = if e.masks.is_empty() { tl!("Create Region") } else { tl!("Reset Region") };
-    let (clicked, _) = row_button(app, ui, r, 160.0, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx)), &label, &format!("{base}.setup"));
-    if clicked {
-        actions.push(("tracking.setup".into(), json!({"clip": clip.0, "effect": idx, "reset": true})));
+    // Auto picks the most trackable patch under the playhead; Manual drops a box to place by hand
+    for (x, mode, label) in [(160.0, "auto", tl!("Auto Region")), (264.0, "manual", tl!("Manual Region"))] {
+        let (clicked, _) = row_button(app, ui, r, x, 96.0, egui::Id::unique(("fx-track-setup", clip.0, idx, mode)), &label, &format!("{base}.setup.{mode}"));
+        if clicked {
+            actions.push(("tracking.setup".into(), json!({"clip": clip.0, "effect": idx, "mode": mode, "reset": true})));
+        }
     }
     // 2. tracking: the Mask Path buttons (backward / forward, one frame or all)
     if !e.masks.is_empty() {

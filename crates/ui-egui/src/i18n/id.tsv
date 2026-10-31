@@ -3589,3 +3589,20 @@
 	The control server is disabled: FILMCRAFT_CONTROL_TOKEN must contain 64 random hex characters (see docs/control-protocol.md)	Server kontrol dinonaktifkan: FILMCRAFT_CONTROL_TOKEN harus berisi 64 karakter heksadesimal acak (lihat docs/control-protocol.md)
 
 # Control server: the bind-failure notice (port collisions; #3318 may show it too).
+
+# Tracking Motion (Effects > Motion Tracking, Effect Controls)
+	Tracking Motion	Pelacakan Gerak
+	Motion Tracking	Pelacakan Gerak
+	Tracking Region	Area Pelacakan
+	Auto Region	Area Otomatis
+	Manual Region	Area Manual
+	Region	Area
+	Follow	Ikuti
+	Manual	Manual
+	Track	Lacak
+	Attached Clips	Klip Terhubung
+	Attach Clip…	Hubungkan Klip…
+	Track the region first	Lacak areanya dulu
+	No other clip overlaps this one	Tidak ada klip lain yang tumpang tindih
+	Update	Perbarui
+	Detach	Lepaskan

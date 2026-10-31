@@ -140,6 +140,12 @@ fn relative(reference: &[Vec2], cur: &[Vec2]) -> Option<Rel> {
     Some(Rel { center: c1, rot_deg: cross.atan2(dot).to_degrees(), scale: (n1 / n0).sqrt() })
 }
 
+/// `offset` turned clockwise by `deg` (y points down) and scaled by `grow`.
+fn orbit(offset: Vec2, deg: f64, grow: f64) -> Vec2 {
+    let (s, c) = deg.to_radians().sin_cos();
+    Vec2::new((offset.x * c - offset.y * s) * grow, (offset.x * s + offset.y * c) * grow)
+}
+
 // ---------------------------------------------------------------- planning
 
 /// One baked Motion sample of a follower.
@@ -198,6 +204,8 @@ impl Tracked<'_> {
         let Some(ref_c) = centroid(&ref_pts) else { return out };
         let to_seq = |mt: Tick| filmcraft_render::motion_matrix(self.seq, self.clip, self.size, self.par, mt);
         let ref_seq = to_seq(link.at).apply(ref_c);
+        // where the follower sits relative to the region's centre: that offset turns and grows with it
+        let offset = link.pos - ref_seq;
         let (t0, t1) = (self.clip.start.max(fol.start), self.clip.end().min(fol.end()));
         let n = ((t1 - t0).0 / self.frame.0.max(1)).clamp(0, MAX_FRAMES);
         for k in 0..n {
@@ -207,9 +215,10 @@ impl Tracked<'_> {
                 continue;
             }
             let Some(rel) = relative(&ref_pts, &vertices(&self.mask.path_at(mt))) else { continue };
-            let pos = link.pos + (to_seq(mt).apply(rel.center) - ref_seq);
             let rot = if self.method == TrackMethod::Position { link.rot } else { link.rot + rel.rot_deg };
             let scale = if self.method == TrackMethod::PositionScaleRotation { link.scale * rel.scale } else { link.scale };
+            let (turn, grow) = (rot - link.rot, scale / link.scale.max(1e-6));
+            let pos = to_seq(mt).apply(rel.center) + orbit(offset, turn, grow);
             if [pos.x, pos.y, rot, scale].iter().all(|v| v.is_finite()) {
                 out.push(Sample { mt: fol.effect_time_at(t), pos, rot, scale });
             }
@@ -259,11 +268,17 @@ fn commit(s: &mut Session, label: &str, pl: Plan) -> Result<usize> {
         for (clip, samples) in &pl.bakes {
             let Some((_, it)) = q.find_item_mut(*clip) else { continue };
             let Some(m) = it.effect_mut("motion") else { continue };
+            let home = pl.links.iter().find(|l| l.clip == *clip);
             for (pid, pick) in [("position", 0), ("rotation", 1), ("scale", 2)] {
+                let Some(p) = m.param_mut(pid) else { continue };
                 if (pick == 1 && method == TrackMethod::Position) || (pick == 2 && method != TrackMethod::PositionScaleRotation) {
+                    // this method leaves the value alone: drop keyframes an earlier method left behind
+                    if let Some(l) = home.filter(|_| !p.keyframes.is_empty()) {
+                        p.keyframes.clear();
+                        p.value = ParamValue::Float(if pick == 1 { l.rot } else { l.scale });
+                    }
                     continue;
                 }
-                let Some(p) = m.param_mut(pid) else { continue };
                 p.keyframes.clear();
                 for sm in samples {
                     let v = match pick {
@@ -563,6 +578,15 @@ mod tests {
         assert!(relative(&dot, &sq).is_none());
         let nan = [Vec2::new(f64::NAN, 0.0), Vec2::ZERO, Vec2::ZERO, Vec2::ZERO];
         assert!(relative(&sq, &nan).is_none());
+    }
+
+    #[test]
+    fn follower_offset_turns_and_grows_with_the_region() {
+        let o = orbit(Vec2::new(100.0, 0.0), 90.0, 2.0);
+        assert!(o.x.abs() < 1e-9 && (o.y - 200.0).abs() < 1e-9, "{o:?}");
+        let same = orbit(Vec2::new(30.0, -40.0), 0.0, 1.0);
+        assert!((same.x - 30.0).abs() < 1e-9 && (same.y + 40.0).abs() < 1e-9);
+        assert_eq!(orbit(Vec2::ZERO, 45.0, 3.0), Vec2::ZERO);
     }
 
     #[test]

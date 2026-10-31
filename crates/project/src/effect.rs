@@ -249,7 +249,7 @@ const STYLIZE: &[&str] = &["Video Effects", "Stylize"];
 const TRANSFORM: &[&str] = &["Video Effects", "Transform"];
 /// Fork addition: effects that exist outside Premiere's catalogue (kept out of "Video Effects" so the
 /// parity checks on that folder stay exact).
-const TRACKING: &[&str] = &["Tracking"];
+const TRACKING: &[&str] = &["Motion Tracking"];
 const VIDEO: &[&str] = &["Video Effects", "Video"];
 const A_AMP: &[&str] = &["Audio Effects", "Amplitude and Compression"];
 const A_DELAY: &[&str] = &["Audio Effects", "Delay and Echo"];
