@@ -118,18 +118,19 @@ impl PresetLibrary {
     /// Built-in and user presets (user presets shadow built-ins of the same name).
     pub fn all(&self) -> Vec<EffectPreset> {
         let mut v: Vec<EffectPreset> = builtin_presets().into_iter().filter(|b| !self.user.iter().any(|u| u.name == b.name)).collect();
-        let extra: Vec<EffectPreset> = self
-            .plugin
-            .iter()
-            .filter(|p| !v.iter().any(|b| b.name == p.name) && !self.user.iter().any(|u| u.name == p.name))
-            .cloned()
-            .collect();
+        let extra: Vec<EffectPreset> =
+            self.plugin.iter().filter(|p| !v.iter().any(|b| b.name == p.name) && !self.user.iter().any(|u| u.name == p.name)).cloned().collect();
         v.extend(extra);
         v.extend(self.user.iter().cloned());
         v
     }
     pub fn find(&self, name: &str) -> Option<EffectPreset> {
-        self.user.iter().find(|p| p.name == name).cloned().or_else(|| self.plugin.iter().find(|p| p.name == name).cloned()).or_else(|| builtin_presets().into_iter().find(|p| p.name == name))
+        self.user
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .or_else(|| self.plugin.iter().find(|p| p.name == name).cloned())
+            .or_else(|| builtin_presets().into_iter().find(|p| p.name == name))
     }
 }
 

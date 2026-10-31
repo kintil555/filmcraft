@@ -195,10 +195,9 @@ fn advanced_page(app: &mut FilmcraftApp, ui: &mut egui::Ui, d: &mut EasingDraft)
         });
         app.auto.add("easing.interp", combo.response.rect, tl!("Interpolation"));
     });
-    for (id, label, value) in [
-        ("easing.outInfluence", tl!("Outgoing influence"), &mut d.out_influence),
-        ("easing.inInfluence", tl!("Incoming influence"), &mut d.in_influence),
-    ] {
+    for (id, label, value) in
+        [("easing.outInfluence", tl!("Outgoing influence"), &mut d.out_influence), ("easing.inInfluence", tl!("Incoming influence"), &mut d.in_influence)]
+    {
         ui.horizontal(|ui| {
             ui.label(label);
             let mut pct = *value * 100.0;

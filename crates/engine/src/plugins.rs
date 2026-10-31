@@ -69,11 +69,7 @@ pub struct Plugin {
 impl Plugin {
     /// The manifest id, or the folder name when the manifest could not be read.
     pub fn id(&self) -> String {
-        if self.manifest.id.is_empty() {
-            self.dir.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string()
-        } else {
-            self.manifest.id.clone()
-        }
+        if self.manifest.id.is_empty() { self.dir.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string() } else { self.manifest.id.clone() }
     }
 }
 
