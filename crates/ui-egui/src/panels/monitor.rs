@@ -96,7 +96,9 @@ fn draw_picture(app: &mut FilmcraftApp, ui: &mut egui::Ui, which: Which, mv: &cr
                 Some(prev) if prev != frame => {
                     app.frames.prefetch_scrub(key, rate, scale, &project, frame - prev, rate.frame_at(duration) - 1);
                 }
-                _ => {}
+                // the playhead rests: nothing queued for the scrub stays behind
+                Some(_) => app.frames.stop_prefetch(),
+                None => {}
             }
         }
     }

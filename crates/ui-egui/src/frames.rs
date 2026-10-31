@@ -462,7 +462,7 @@ struct FrameRequest<'a> {
 /// Frames queued ahead of the playhead while playing (and how far ahead a queued job may be
 /// before it is dropped as stale).
 pub fn prefetch_depth(speed: f64) -> i64 {
-    if speed.abs() > 1.5 { 32 } else { 20 }
+    if speed.abs() > 1.5 { 24 } else { 14 }
 }
 
 /// Playback starts its clock once this many frames from the playhead are ready, or after
@@ -541,7 +541,7 @@ impl FrameServer {
 
     /// The default number of frame workers for this machine.
     pub fn default_workers() -> usize {
-        std::thread::available_parallelism().map(|n| n.get().saturating_sub(1).clamp(2, 8)).unwrap_or(3)
+        std::thread::available_parallelism().map(|n| n.get().saturating_sub(1).clamp(2, 6)).unwrap_or(3)
     }
 
     pub fn set_context(&self, ctx: &egui::Context) {
@@ -725,7 +725,12 @@ impl FrameServer {
     /// frame on screen and the ones far from the playhead are dropped, so a long drag cannot pile
     /// them up.
     pub fn prefetch_scrub(&self, key: FrameKey, rate: filmcraft_time::FrameRate, scale: f32, project: &Arc<Project>, dir: i64, last: i64) {
-        const AHEAD: i64 = 4;
+        const AHEAD: i64 = 2;
+        // frames that cost more than their interval would only compete with the one on screen
+        let (num, den) = (rate.as_f64(), 1.0);
+        if self.render_cost() * num / den > 0.5 {
+            return;
+        }
         let dir = if dir < 0 { -1 } else { 1 };
         for i in 1..=AHEAD {
             let f = key.frame + i * dir;
