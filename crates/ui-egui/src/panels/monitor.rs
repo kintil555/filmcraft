@@ -90,6 +90,18 @@ fn draw_picture(app: &mut FilmcraftApp, ui: &mut egui::Ui, which: Which, mv: &cr
         }
     } else {
         app.frames.request(key, rate.tick_of(frame), scale, &project, 0);
+        if which == Which::Program {
+            // the playhead moved while paused (a scrub): warm the frames it is heading for
+            match app.scrub_prev_frame.replace(frame) {
+                Some(prev) if prev != frame => {
+                    app.frames.prefetch_scrub(key, rate, scale, &project, frame - prev, rate.frame_at(duration) - 1);
+                }
+                _ => {}
+            }
+        }
+    }
+    if playing {
+        app.scrub_prev_frame = None;
     }
     let asked = asked_before(app, prefix, key, playing);
     let tex_name = if channel {

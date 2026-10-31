@@ -127,6 +127,7 @@ impl FilmcraftApp {
             applied_prefs: None,
             applied_ui_scale: None,
             workspace_restored: false,
+            scrub_prev_frame: None,
             persisted_dock: None,
             persisted_timeline: None,
             workspaces,

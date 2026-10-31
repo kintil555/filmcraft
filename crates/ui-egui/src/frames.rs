@@ -462,7 +462,7 @@ struct FrameRequest<'a> {
 /// Frames queued ahead of the playhead while playing (and how far ahead a queued job may be
 /// before it is dropped as stale).
 pub fn prefetch_depth(speed: f64) -> i64 {
-    if speed.abs() > 1.5 { 24 } else { 14 }
+    if speed.abs() > 1.5 { 32 } else { 20 }
 }
 
 /// Playback starts its clock once this many frames from the playhead are ready, or after
@@ -541,7 +541,7 @@ impl FrameServer {
 
     /// The default number of frame workers for this machine.
     pub fn default_workers() -> usize {
-        std::thread::available_parallelism().map(|n| n.get().clamp(2, 6)).unwrap_or(3)
+        std::thread::available_parallelism().map(|n| n.get().saturating_sub(1).clamp(2, 8)).unwrap_or(3)
     }
 
     pub fn set_context(&self, ctx: &egui::Context) {
@@ -717,6 +717,44 @@ impl FrameServer {
         let (target, rev, cur) = (key.target, key.revision, key.frame);
         let span = (lead + ahead * stride) * step + 26;
         self.retain_queue(|k| k.target != target || (k.revision == rev && (k.frame - cur) * dir >= 0 && (k.frame - cur).abs() < span));
+    }
+
+    /// While scrubbing (paused, the playhead moving): decode the frames the playhead is heading
+    /// for, `dir` being its direction (+1 / -1), plus one behind it for a reversal, so the next
+    /// positions of a drag are cached before they are asked for. Prefetch jobs never cancel the
+    /// frame on screen and the ones far from the playhead are dropped, so a long drag cannot pile
+    /// them up.
+    pub fn prefetch_scrub(&self, key: FrameKey, rate: filmcraft_time::FrameRate, scale: f32, project: &Arc<Project>, dir: i64, last: i64) {
+        const AHEAD: i64 = 4;
+        let dir = if dir < 0 { -1 } else { 1 };
+        for i in 1..=AHEAD {
+            let f = key.frame + i * dir;
+            if f >= 0 && f <= last {
+                self.request_job(FrameRequest {
+                    key: FrameKey { frame: f, ..key },
+                    time: rate.tick_of(f),
+                    scale,
+                    project,
+                    priority: i as u32,
+                    prefetch: true,
+                    catch_up: None,
+                });
+            }
+        }
+        let back = key.frame - dir;
+        if back >= 0 && back <= last {
+            self.request_job(FrameRequest {
+                key: FrameKey { frame: back, ..key },
+                time: rate.tick_of(back),
+                scale,
+                project,
+                priority: AHEAD as u32 + 1,
+                prefetch: true,
+                catch_up: None,
+            });
+        }
+        let (target, rev, cur) = (key.target, key.revision, key.frame);
+        self.retain_queue(|k| k.target != target || (k.revision == rev && (k.frame - cur).abs() <= AHEAD + 4));
     }
 
     /// Whether playback can start at `key`: the next [`PREROLL_FRAMES`] frames (up to `last`)

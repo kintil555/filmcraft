@@ -371,6 +371,8 @@ pub struct FilmcraftApp {
     /// Settings ▸ Appearance ▸ UI Scale last applied, with the system scale it was applied for.
     applied_ui_scale: Option<(Option<f32>, f32)>,
     workspace_restored: bool,
+    /// The Program monitor frame of the previous paused pass (the scrub direction).
+    scrub_prev_frame: Option<i64>,
     /// The docking layout last written to the current workspace (auto-saved on change).
     persisted_dock: Option<dock::Layout>,
     /// The timeline settings last written to `ui_state.json`.
