@@ -225,7 +225,7 @@ pub fn show_revert(app: &mut FilmcraftApp, ctx: &egui::Context) -> bool {
         });
     });
     // (the modal's own close also fires on Escape: not while a drag is being cancelled, #580)
-    open && !(r.should_close() && !ctx.input(|i| i.pointer.any_down()))
+    open && (!r.should_close() || ctx.input(|i| i.pointer.any_down()))
 }
 
 /// A label cell of the New Project form.
