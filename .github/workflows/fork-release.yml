@@ -48,14 +48,24 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
         run: |
-          cargo build --release -p filmcraft
+          cargo build --release -p filmcraft --features depth-anything
           if (-not (Test-Path target/release/filmcraft.pdb)) { throw "filmcraft.pdb was not produced" }
+
+      # Neural depth weights (Apache-2.0: DINOv2 ViT-S/14 and Depth Anything V2 Small) ship in the zip,
+      # in models/ next to filmcraft.exe, where the app finds them without any setting.
+      - name: Depth models
+        shell: bash
+        run: |
+          mkdir -p dist/models
+          curl -fL --retry 3 -o dist/models/dinov2_vits14.safetensors https://huggingface.co/lmz/candle-dino-v2/resolve/main/dinov2_vits14.safetensors
+          curl -fL --retry 3 -o dist/models/depth_anything_v2_vits.safetensors https://huggingface.co/jeroenvlek/depth-anything-v2-safetensors/resolve/main/depth_anything_v2_vits.safetensors
+          ls -l dist/models
 
       - name: Package
         shell: pwsh
         run: |
           $zip = "filmcraft-${{ steps.ver.outputs.v }}-windows-x64-portable.zip"
-          New-Item -ItemType Directory -Path dist | Out-Null
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item target/release/filmcraft.exe dist/
           Copy-Item docs/plugins.md dist/
           Compress-Archive -Path dist/* -DestinationPath $zip

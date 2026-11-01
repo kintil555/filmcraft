@@ -605,15 +605,22 @@ pub struct PendingTrack {
     applied: usize,
 }
 
-/// The neural depth model planar tracking uses: the folder named by `FILMCRAFT_DEPTH_MODEL`
-/// (Depth Anything V2 Small, see `crates/depth/README.md`). `Ok(None)` when none is configured or
+/// The `models` folder next to the executable, when it holds the depth weights (release zips ship it).
+#[cfg(feature = "depth-anything")]
+fn bundled_depth_models() -> Option<std::path::PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.join("models");
+    dir.join("dinov2_vits14.safetensors").is_file().then_some(dir)
+}
+
+/// The neural depth model planar tracking uses: the folder named by `FILMCRAFT_DEPTH_MODEL`, else
+/// the `models` folder next to the executable (Depth Anything V2 Small, see `crates/depth/README.md`). `Ok(None)` when none is configured or
 /// the engine is built without the `depth-anything` feature; `Err` when the folder is configured
 /// but the model does not load (tracking then goes on without depth).
 fn depth_estimator() -> std::result::Result<Option<Box<dyn filmcraft_depth::Estimator>>, String> {
     #[cfg(feature = "depth-anything")]
     {
-        let Some(dir) = std::env::var_os("FILMCRAFT_DEPTH_MODEL") else { return Ok(None) };
-        let model = filmcraft_depth::DepthAnything::load(std::path::Path::new(&dir)).map_err(|e| e.to_string())?;
+        let Some(dir) = std::env::var_os("FILMCRAFT_DEPTH_MODEL").map(std::path::PathBuf::from).or_else(bundled_depth_models) else { return Ok(None) };
+        let model = filmcraft_depth::DepthAnything::load(&dir).map_err(|e| e.to_string())?;
         Ok(Some(Box::new(model)))
     }
     #[cfg(not(feature = "depth-anything"))]
