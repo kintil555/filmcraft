@@ -625,8 +625,8 @@ fn depth_estimator() -> std::result::Result<Option<Box<dyn filmcraft_depth::Esti
 /// Run the depth model on every Nth tracked frame (`FILMCRAFT_DEPTH_STRIDE`, 1 to 30, default 1);
 /// the frames in between reuse the last depth map. The model costs about a second per frame on the
 /// CPU, so a stride of 2 to 4 speeds long tracks up at a small cost in plane selection.
-fn depth_stride() -> u64 {
-    std::env::var("FILMCRAFT_DEPTH_STRIDE").ok().and_then(|v| v.trim().parse::<u64>().ok()).map_or(1, |n| n.clamp(1, 30))
+fn depth_stride() -> usize {
+    std::env::var("FILMCRAFT_DEPTH_STRIDE").ok().and_then(|v| v.trim().parse::<usize>().ok()).map_or(1, |n| n.clamp(1, 30))
 }
 
 /// Longest side of the frames the tracker works on (speed; the result is in clip pixels).
