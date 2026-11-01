@@ -674,7 +674,7 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
             Some((first, mut k_prev)) => {
                 lock(&out).push((mt0, path.clone()));
                 let region0: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
-                let mut tracker = filmcraft_render::track::Tracker::new(first, &region0, method);
+                let mut tracker = filmcraft_render::track::AnyTracker::new(first, &region0, method);
                 for step in 1..=steps {
                     if prog.cancel.load(Ordering::Relaxed) {
                         err = Some("stopped".into());
@@ -691,18 +691,15 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                         break;
                     };
                     // frame pixels → clip pixels
-                    let m = Affine::scale(1.0 / k, 1.0 / k).then_apply(&st.transform).then_apply(&Affine::scale(k_prev, k_prev));
-                    path = path.transformed(&m);
+                    let Some(moved) = moved_path(&path, &st.motion, k_prev, k) else {
+                        err = Some(format!("lost track after {} frame(s): the plane's perspective became degenerate", step - 1));
+                        break;
+                    };
+                    path = moved;
                     lock(&out).push((t, path.clone()));
                     done += 1;
                     prog.done.store(done, Ordering::Relaxed);
-                    let note = if st.coasting {
-                        " · recovering"
-                    } else if st.anchored {
-                        " · drift-corrected"
-                    } else {
-                        ""
-                    };
+                    let note = step_note(&st);
                     *lock(&prog.status) = format!("Frame {step} of {steps} · {} features{note}", st.inliers);
                     k_prev = k;
                 }
@@ -740,6 +737,30 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let st = s.jobs.iter().find(|j| j.id == id).map(crate::Job::to_json).unwrap_or(Value::Null);
     Ok(json!({"job": id, "frames": steps, "status": st}))
+}
+
+/// `path` (clip pixels) after one tracked step: the tracker saw frame pixels, `k_prev` / `k` times
+/// the clip's before / after. `None` when a perspective warp sends a point to infinity.
+fn moved_path(path: &MaskPath, motion: &filmcraft_render::track::Motion, k_prev: f64, k: f64) -> Option<MaskPath> {
+    use filmcraft_geom::Homography;
+    use filmcraft_render::track::Motion;
+    match motion {
+        Motion::Affine(a) => Some(path.transformed(&Affine::scale(1.0 / k, 1.0 / k).then_apply(a).then_apply(&Affine::scale(k_prev, k_prev)))),
+        Motion::Perspective(h) => {
+            let full =
+                Homography::from_affine(&Affine::scale(1.0 / k, 1.0 / k)).then_apply(h).then_apply(&Homography::from_affine(&Affine::scale(k_prev, k_prev)));
+            path.warped(&full)
+        }
+    }
+}
+
+/// Status-line suffix for a tracking step.
+fn step_note(st: &filmcraft_render::track::AnyStep) -> &'static str {
+    match (st.coasting, st.anchored) {
+        (true, _) => " · recovering",
+        (false, true) => " · drift-corrected",
+        _ => "",
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

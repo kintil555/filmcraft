@@ -2221,6 +2221,7 @@
 	Position & Rotation	位置与旋转
 	Position Amount	位置量
 	Position, Scale & Rotation	位置、缩放与旋转
+	Perspective (Planar)	透视（平面）
 	Position, Scale, Rotation	位置、缩放、旋转
 	Posterize	色调分离
 	Posterize Time	时间色调分离

@@ -20,9 +20,12 @@
 //! The result is the transform mapping frame A's pixels to frame B's; the engine applies it to
 //! the mask path to write the next Mask Path keyframe.
 
-use filmcraft_geom::{Affine, Vec2};
+use filmcraft_geom::{Affine, Homography, Vec2};
 use filmcraft_project::TrackMethod;
 use rayon::prelude::*;
+
+mod planar;
+pub use planar::{PlanarStep, PlanarTracker};
 
 /// Most features tracked per frame.
 pub const MAX_FEATURES: usize = 160;
@@ -561,6 +564,53 @@ impl Tracker {
             .collect();
         let (src, dst): (Vec<Vec2>, Vec<Vec2>) = pairs.into_iter().unzip();
         fit_robust(self.method, &src, &dst)
+    }
+}
+
+/// How one frame's picture moved: as a similarity, or as a plane in perspective.
+#[derive(Clone, Copy, Debug)]
+pub enum Motion {
+    Affine(Affine),
+    Perspective(Homography),
+}
+
+/// One step of an [`AnyTracker`].
+#[derive(Clone, Copy, Debug)]
+pub struct AnyStep {
+    /// Previous frame's pixels → the next frame's.
+    pub motion: Motion,
+    pub inliers: usize,
+    pub coasting: bool,
+    pub anchored: bool,
+}
+
+/// The tracker for a [`TrackMethod`]: the similarity [`Tracker`], or the [`PlanarTracker`] for
+/// [`TrackMethod::Perspective`].
+pub enum AnyTracker {
+    Similarity(Box<Tracker>),
+    Planar(Box<PlanarTracker>),
+}
+
+impl AnyTracker {
+    pub fn new(first: Prepared, region: &[Vec2], method: TrackMethod) -> Self {
+        match method {
+            TrackMethod::Perspective => AnyTracker::Planar(Box::new(PlanarTracker::new(first, region))),
+            m => AnyTracker::Similarity(Box::new(Tracker::new(first, region, m))),
+        }
+    }
+
+    pub fn advance(&mut self, next: Prepared, region: &[Vec2]) -> Option<AnyStep> {
+        match self {
+            AnyTracker::Similarity(t) => {
+                t.advance(next, region).map(|s| AnyStep { motion: Motion::Affine(s.transform), inliers: s.inliers, coasting: s.coasting, anchored: s.anchored })
+            }
+            AnyTracker::Planar(t) => t.advance(next, region).map(|s| AnyStep {
+                motion: Motion::Perspective(s.homography),
+                inliers: s.inliers,
+                coasting: s.coasting,
+                anchored: s.anchored,
+            }),
+        }
     }
 }
 

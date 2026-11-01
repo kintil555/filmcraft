@@ -616,7 +616,7 @@ fn build_effects() -> Vec<EffectDef> {
             TRACKING,
             vec![
                 ch("mode", "Region", &["Auto", "Manual"], 0),
-                ch("method", "Follow", &["Position", "Position & Rotation", "Position, Scale & Rotation"], 2),
+                ch("method", "Follow", &["Position", "Position & Rotation", "Position, Scale & Rotation", "Perspective (Planar)"], 2),
                 txt("links", "Attached Clips"),
             ],
         ),

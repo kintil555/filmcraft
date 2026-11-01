@@ -15,9 +15,16 @@
 //!   [`on_track_finished`]) or `tracking.update` refreshes every follower;
 //! * `tracking.detach` unlinks a clip and gives it back its own static Motion.
 //!
+//! **Planar tracking** (Follow ▸ *Perspective (Planar)*): the region is followed as a plane in
+//! perspective (a homography, see `filmcraft_render::track::PlanarTracker`), the way DaVinci's
+//! Planar Tracker follows a wall or a screen. Attached clips then keep their own Motion and get a
+//! keyframed **Corner Pin** instead: each frame the plane's projective change since the attach
+//! moment is carried into the follower's own pixel space, so text or a picture sits on the surface
+//! with its perspective. Switching the Follow method back removes that Corner Pin again.
+//!
 //! Every command is one undo step.
 
-use filmcraft_geom::Vec2;
+use filmcraft_geom::{Affine, Homography, Vec2};
 use filmcraft_project::{ClipId, Mask, MaskPath, ParamValue, TrackItem, TrackMethod};
 use filmcraft_time::Tick;
 use serde_json::{Value, json};
@@ -156,6 +163,9 @@ struct Sample {
     pos: Vec2,
     rot: f64,
     scale: f64,
+    /// Perspective follow: the follower's four corners (upper left, upper right, lower right,
+    /// lower left) in its own source pixels, for its Corner Pin.
+    pin: Option<[Vec2; 4]>,
 }
 
 struct Plan {
@@ -185,6 +195,7 @@ fn region(it: &TrackItem, effect: usize) -> Result<(&filmcraft_project::EffectIn
 
 /// What baking a follower needs to know about the tracked clip.
 struct Tracked<'a> {
+    project: &'a filmcraft_project::Project,
     seq: &'a filmcraft_project::Sequence,
     clip: &'a TrackItem,
     mask: &'a Mask,
@@ -199,6 +210,9 @@ struct Tracked<'a> {
 impl Tracked<'_> {
     /// `link`'s follower `fol` moved along the track, one sample per frame both clips cover.
     fn bake(&self, link: &Link, fol: &TrackItem) -> Vec<Sample> {
+        if self.method == TrackMethod::Perspective {
+            return self.bake_perspective(link, fol);
+        }
         let mut out = Vec::new();
         let ref_pts = vertices(&self.mask.path_at(link.at));
         let Some(ref_c) = centroid(&ref_pts) else { return out };
@@ -220,10 +234,100 @@ impl Tracked<'_> {
             let (turn, grow) = (rot - link.rot, scale / link.scale.max(1e-6));
             let pos = to_seq(mt).apply(rel.center) + orbit(offset, turn, grow);
             if [pos.x, pos.y, rot, scale].iter().all(|v| v.is_finite()) {
-                out.push(Sample { mt: fol.effect_time_at(t), pos, rot, scale });
+                out.push(Sample { mt: fol.effect_time_at(t), pos, rot, scale, pin: None });
             }
         }
         out
+    }
+}
+
+impl Tracked<'_> {
+    /// Perspective follow: `link`'s follower pinned to the tracked plane, one Corner Pin sample per
+    /// frame both clips cover.
+    fn bake_perspective(&self, link: &Link, fol: &TrackItem) -> Vec<Sample> {
+        let mut out = Vec::new();
+        let ref_pts = vertices(&self.mask.path_at(link.at));
+        let to_seq = |mt: Tick| filmcraft_render::motion_matrix(self.seq, self.clip, self.size, self.par, mt);
+        let Some(ref_inv) = to_seq(link.at).inverse() else { return out };
+        let fsize = filmcraft_render::source_size(self.project, fol.item).unwrap_or((self.seq.settings.width, self.seq.settings.height));
+        // the follower's own Motion as it was attached (an earlier Follow method may have keyframed it)
+        let mut home = fol.clone();
+        if let Some(m) = home.effect_mut("motion") {
+            reset_motion(m, link);
+        }
+        let m_f = filmcraft_render::motion_matrix(self.seq, &home, fsize, filmcraft_render::source_par(self.project, fol.item), Tick(0));
+        let (fw, fh) = (fsize.0 as f64, fsize.1 as f64);
+        let corners = [Vec2::new(0.0, 0.0), Vec2::new(fw, 0.0), Vec2::new(fw, fh), Vec2::new(0.0, fh)];
+        let (t0, t1) = (self.clip.start.max(fol.start), self.clip.end().min(fol.end()));
+        let n = ((t1 - t0).0 / self.frame.0.max(1)).clamp(0, MAX_FRAMES);
+        for k in 0..n {
+            let t = t0 + Tick(self.frame.0 * k);
+            let mt = self.clip.effect_time_at(t);
+            if mt < self.span.0 || mt > self.span.1 {
+                continue;
+            }
+            // the plane's change since the attach moment, in clip pixels, then in sequence pixels
+            let Some(rel) = Homography::fit(&ref_pts, &vertices(&self.mask.path_at(mt))) else { continue };
+            let plane = Homography::from_affine(&to_seq(mt)).then_apply(&rel).then_apply(&Homography::from_affine(&ref_inv));
+            if let Some(pin) = pin_corners(&plane, &m_f, &corners) {
+                out.push(Sample { mt: fol.effect_time_at(t), pos: Vec2::ZERO, rot: 0.0, scale: 0.0, pin: Some(pin) });
+            }
+        }
+        out
+    }
+}
+
+/// The follower's Corner Pin corners. `plane` is the surface's change in sequence pixels, `m_f` the
+/// follower's Motion (its source pixels → sequence pixels): a corner goes to sequence pixels,
+/// moves with the plane, and comes back into the follower's source pixels, where Corner Pin works.
+fn pin_corners(plane: &Homography, m_f: &Affine, corners: &[Vec2; 4]) -> Option<[Vec2; 4]> {
+    let inv = Homography::from_affine(&m_f.inverse()?);
+    let full = inv.then_apply(plane).then_apply(&Homography::from_affine(m_f));
+    let pts = corners.iter().map(|c| full.apply(*c)).collect::<Option<Vec<_>>>()?;
+    pts.try_into().ok()
+}
+
+/// Corner Pin parameter ids, in [`Sample::pin`] order.
+const PIN: [&str; 4] = ["upper_left", "upper_right", "lower_right", "lower_left"];
+
+/// A follower's Motion back to the values it had when it was attached.
+fn reset_motion(m: &mut filmcraft_project::EffectInstance, l: &Link) {
+    for (pid, v) in [("position", ParamValue::Vec2(l.pos)), ("rotation", ParamValue::Float(l.rot)), ("scale", ParamValue::Float(l.scale))] {
+        if let Some(p) = m.param_mut(pid) {
+            p.keyframes.clear();
+            p.value = v;
+        }
+    }
+}
+
+/// Write the planar track onto a follower: its Motion stays still and its Corner Pin (added when
+/// missing) carries the keyframed corners.
+fn write_pin(it: &mut TrackItem, home: Option<&Link>, samples: &[Sample]) {
+    if let (Some(l), Some(m)) = (home, it.effect_mut("motion")) {
+        reset_motion(m, l);
+    }
+    if it.effect("corner_pin").is_none() {
+        let Some(def) = filmcraft_project::effect::find_effect("corner_pin") else { return };
+        it.effects.push(def.instance());
+    }
+    let Some(e) = it.effect_mut("corner_pin") else { return };
+    for (i, id) in PIN.iter().enumerate() {
+        let Some(p) = e.param_mut(id) else { continue };
+        p.keyframes.clear();
+        for sm in samples {
+            if let Some(c) = sm.pin.and_then(|pin| pin.get(i).copied()) {
+                p.put_keyframe(sm.mt, ParamValue::Vec2(c));
+            }
+        }
+    }
+}
+
+/// Remove the keyframed Corner Pin a planar track left on a follower (all four corners animated).
+fn drop_pin(it: &mut TrackItem) {
+    let animated =
+        |e: &filmcraft_project::EffectInstance| e.effect == "corner_pin" && PIN.iter().all(|id| e.param(id).is_some_and(|p| !p.keyframes.is_empty()));
+    if let Some(i) = it.effects.iter().position(animated) {
+        it.effects.remove(i);
     }
 }
 
@@ -241,6 +345,7 @@ fn plan(s: &Session, tracker: ClipId, effect: usize, links: Vec<Link>) -> Result
         return Err(bad("tracking", "the sequence has no frame rate"));
     }
     let tracked = Tracked {
+        project: &s.project,
         seq,
         clip: tr,
         mask,
@@ -252,6 +357,31 @@ fn plan(s: &Session, tracker: ClipId, effect: usize, links: Vec<Link>) -> Result
     };
     let bakes = links.iter().filter_map(|l| seq.find_item(l.clip).map(|(_, fol)| (l.clip, tracked.bake(l, fol)))).collect();
     Ok(Plan { tracker, effect, links, bakes })
+}
+
+/// Bake a follower's Motion keyframes (position, and rotation / scale when `method` follows them).
+fn write_motion(it: &mut TrackItem, home: Option<&Link>, samples: &[Sample], method: TrackMethod) {
+    let Some(m) = it.effect_mut("motion") else { return };
+    for (pid, pick) in [("position", 0), ("rotation", 1), ("scale", 2)] {
+        let Some(p) = m.param_mut(pid) else { continue };
+        if (pick == 1 && method == TrackMethod::Position) || (pick == 2 && method != TrackMethod::PositionScaleRotation) {
+            // this method leaves the value alone: drop keyframes an earlier method left behind
+            if let Some(l) = home.filter(|_| !p.keyframes.is_empty()) {
+                p.keyframes.clear();
+                p.value = ParamValue::Float(if pick == 1 { l.rot } else { l.scale });
+            }
+            continue;
+        }
+        p.keyframes.clear();
+        for sm in samples {
+            let v = match pick {
+                0 => ParamValue::Vec2(sm.pos),
+                1 => ParamValue::Float(sm.rot),
+                _ => ParamValue::Float(sm.scale),
+            };
+            p.put_keyframe(sm.mt, v);
+        }
+    }
 }
 
 /// Write a [`Plan`]: the links text on the tracker and the baked Motion keyframes on the followers.
@@ -267,28 +397,13 @@ fn commit(s: &mut Session, label: &str, pl: Plan) -> Result<usize> {
         let q = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
         for (clip, samples) in &pl.bakes {
             let Some((_, it)) = q.find_item_mut(*clip) else { continue };
-            let Some(m) = it.effect_mut("motion") else { continue };
             let home = pl.links.iter().find(|l| l.clip == *clip);
-            for (pid, pick) in [("position", 0), ("rotation", 1), ("scale", 2)] {
-                let Some(p) = m.param_mut(pid) else { continue };
-                if (pick == 1 && method == TrackMethod::Position) || (pick == 2 && method != TrackMethod::PositionScaleRotation) {
-                    // this method leaves the value alone: drop keyframes an earlier method left behind
-                    if let Some(l) = home.filter(|_| !p.keyframes.is_empty()) {
-                        p.keyframes.clear();
-                        p.value = ParamValue::Float(if pick == 1 { l.rot } else { l.scale });
-                    }
-                    continue;
-                }
-                p.keyframes.clear();
-                for sm in samples {
-                    let v = match pick {
-                        0 => ParamValue::Vec2(sm.pos),
-                        1 => ParamValue::Float(sm.rot),
-                        _ => ParamValue::Float(sm.scale),
-                    };
-                    p.put_keyframe(sm.mt, v);
-                }
+            if method == TrackMethod::Perspective {
+                write_pin(it, home, samples);
+                continue;
             }
+            drop_pin(it);
+            write_motion(it, home, samples, method);
         }
         let (_, tr) = q.find_item_mut(pl.tracker).ok_or(filmcraft_edit::EditError::NoItem(pl.tracker))?;
         let e = tr.effects.get_mut(pl.effect).ok_or_else(|| bad("tracking", "the effect is gone"))?;
@@ -495,16 +610,12 @@ fn detach(s: &mut Session, p: &Value) -> Result<Value> {
     .ok_or_else(|| bad("tracking.detach", "that clip is not attached"))?;
     s.edit("Detach from Tracking", move |pr, _| {
         let q = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
-        if let Some((_, it)) = q.find_item_mut(follower)
-            && let Some(m) = it.effect_mut("motion")
-        {
+        if let Some((_, it)) = q.find_item_mut(follower) {
             // back to the values it had when it was attached
-            for (pid, v) in [("position", ParamValue::Vec2(link.pos)), ("rotation", ParamValue::Float(link.rot)), ("scale", ParamValue::Float(link.scale))] {
-                if let Some(p) = m.param_mut(pid) {
-                    p.keyframes.clear();
-                    p.value = v;
-                }
+            if let Some(m) = it.effect_mut("motion") {
+                reset_motion(m, &link);
             }
+            drop_pin(it);
         }
         let (_, tr) = q.find_item_mut(clip).ok_or(filmcraft_edit::EditError::NoItem(clip))?;
         let e = tr.effects.get_mut(ei).ok_or_else(|| bad("tracking.detach", "the effect is gone"))?;
@@ -590,6 +701,28 @@ mod tests {
         let same = orbit(Vec2::new(30.0, -40.0), 0.0, 1.0);
         assert!((same.x - 30.0).abs() < 1e-9 && (same.y + 40.0).abs() < 1e-9);
         assert_eq!(orbit(Vec2::ZERO, 45.0, 3.0), Vec2::ZERO);
+    }
+
+    #[test]
+    fn pin_follows_the_plane_in_the_followers_own_pixels() {
+        let corners = [Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0), Vec2::new(400.0, 200.0), Vec2::new(0.0, 200.0)];
+        // follower drawn at 50 % around the sequence point (960, 540), anchor at its centre
+        let m_f = Affine::motion(Vec2::new(960.0, 540.0), Vec2::new(0.5, 0.5), 0.0, Vec2::new(200.0, 100.0));
+        // the plane did not change: the corners stay where they are
+        let same = pin_corners(&Homography::IDENTITY, &m_f, &corners).unwrap_or_else(|| panic!("no pin"));
+        for (a, b) in same.iter().zip(&corners) {
+            assert!((*a - *b).length() < 1e-9, "{a:?} vs {b:?}");
+        }
+        // the plane slid 30 px right in the sequence: the follower's corners slide 60 px (it is half size)
+        let shift = Homography::from_affine(&Affine::translate(30.0, 0.0));
+        let moved = pin_corners(&shift, &m_f, &corners).unwrap_or_else(|| panic!("no pin"));
+        for (a, b) in moved.iter().zip(&corners) {
+            assert!((*a - (*b + Vec2::new(60.0, 0.0))).length() < 1e-9, "{a:?} vs {b:?}");
+        }
+        // a Motion that can't be inverted, or a plane that sends a corner to infinity, gives no pin
+        assert!(pin_corners(&Homography::IDENTITY, &Affine::scale(0.0, 0.0), &corners).is_none());
+        let horizon = Homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0]);
+        assert!(pin_corners(&horizon, &Affine::IDENTITY, &corners).is_none());
     }
 
     #[test]

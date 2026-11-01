@@ -179,6 +179,20 @@ impl MaskPath {
         }
     }
 
+    /// The path with every point and tangent handle projected by `h` (a planar-tracking step).
+    /// `None` when a point lands at infinity, so a degenerate warp never writes a broken path.
+    pub fn warped(&self, h: &filmcraft_geom::Homography) -> Option<Self> {
+        let vertices = self
+            .vertices
+            .iter()
+            .map(|v| {
+                let p = h.apply(v.p)?;
+                Some(MaskVertex { p, t_in: h.apply(v.p + v.t_in)? - p, t_out: h.apply(v.p + v.t_out)? - p })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self { vertices, closed: self.closed })
+    }
+
     /// Mean of the vertex positions.
     pub fn centroid(&self) -> Vec2 {
         if self.vertices.is_empty() {
@@ -352,15 +366,19 @@ pub enum TrackMethod {
     PositionRotation,
     #[default]
     PositionScaleRotation,
+    /// Planar tracking: the masked surface (a wall, a screen, a sign) is followed as a plane in
+    /// perspective (a homography), so things pinned to it keep its foreshortening.
+    Perspective,
 }
 
 impl TrackMethod {
-    pub const ALL: [TrackMethod; 3] = [TrackMethod::Position, TrackMethod::PositionRotation, TrackMethod::PositionScaleRotation];
+    pub const ALL: [TrackMethod; 4] = [TrackMethod::Position, TrackMethod::PositionRotation, TrackMethod::PositionScaleRotation, TrackMethod::Perspective];
     pub fn label(self) -> &'static str {
         match self {
             TrackMethod::Position => "Position",
             TrackMethod::PositionRotation => "Position & Rotation",
             TrackMethod::PositionScaleRotation => "Position, Scale & Rotation",
+            TrackMethod::Perspective => "Perspective (Planar)",
         }
     }
     pub fn from_name(s: &str) -> Option<Self> {
@@ -368,6 +386,7 @@ impl TrackMethod {
             "position" => Some(TrackMethod::Position),
             "positionrotation" => Some(TrackMethod::PositionRotation),
             "positionscalerotation" => Some(TrackMethod::PositionScaleRotation),
+            "perspective" | "planar" | "perspectiveplanar" => Some(TrackMethod::Perspective),
             _ => None,
         }
     }

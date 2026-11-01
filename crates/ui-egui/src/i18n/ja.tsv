@@ -2227,6 +2227,7 @@
 	Position & Rotation	位置・回転
 	Position Amount	移動量
 	Position, Scale & Rotation	位置・スケール・回転
+	Perspective (Planar)	パース（平面）
 	Position, Scale, Rotation	位置・スケール・回転
 	Posterize	ポスタライズ
 	Posterize Time	時間のポスタライズ
