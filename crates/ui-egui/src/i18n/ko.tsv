@@ -2321,6 +2321,7 @@
 	Position & Rotation	위치 및 회전
 	Position Amount	위치 양
 	Position, Scale & Rotation	위치, 비율 및 회전
+	Perspective (Planar)	원근 (평면)
 	Position, Scale, Rotation	위치, 비율, 회전
 	Position:	위치:
 	Position: bottom	위치: 아래
