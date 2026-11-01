@@ -25,7 +25,7 @@ use filmcraft_project::TrackMethod;
 use rayon::prelude::*;
 
 mod planar;
-pub use planar::{PlanarStep, PlanarTracker};
+pub use planar::{DepthSample, MAX_COAST_OFF_CANVAS, PlanarOptions, PlanarStep, PlanarTracker};
 
 /// Most features tracked per frame.
 pub const MAX_FEATURES: usize = 160;
@@ -593,8 +593,14 @@ pub enum AnyTracker {
 
 impl AnyTracker {
     pub fn new(first: Prepared, region: &[Vec2], method: TrackMethod) -> Self {
+        Self::with_options(first, region, method, PlanarOptions::default())
+    }
+
+    /// [`AnyTracker::new`] with the planar tracker's options (`depth_strength`); the similarity
+    /// trackers ignore them.
+    pub fn with_options(first: Prepared, region: &[Vec2], method: TrackMethod, planar: PlanarOptions) -> Self {
         match method {
-            TrackMethod::Perspective => AnyTracker::Planar(Box::new(PlanarTracker::new(first, region))),
+            TrackMethod::Perspective => AnyTracker::Planar(Box::new(PlanarTracker::with_options(first, region, planar))),
             m => AnyTracker::Similarity(Box::new(Tracker::new(first, region, m))),
         }
     }

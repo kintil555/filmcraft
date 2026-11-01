@@ -617,6 +617,8 @@ fn build_effects() -> Vec<EffectDef> {
             vec![
                 ch("mode", "Region", &["Auto", "Manual"], 0),
                 ch("method", "Follow", &["Position", "Position & Rotation", "Position, Scale & Rotation", "Perspective (Planar)"], 2),
+                // Planar tracking: how strictly features at another depth than the plane are rejected
+                f("depth", "Depth Detection", 60.0, 0.0, 100.0, "%"),
                 txt("links", "Attached Clips"),
             ],
         ),

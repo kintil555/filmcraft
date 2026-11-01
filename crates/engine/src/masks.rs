@@ -658,6 +658,14 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
     let keys: Arc<Mutex<Vec<(Tick, MaskPath)>>> = Arc::default();
     let (prog, res, out) = (job.progress.clone(), job.result.clone(), keys.clone());
     let start_path = mask.path_at(mt0);
+    // Tracking Motion's Depth Detection (0–100 %): how strictly features off the plane are rejected
+    let planar = filmcraft_render::track::PlanarOptions {
+        depth_strength: it
+            .effects
+            .get(ei)
+            .filter(|e| e.effect == crate::motion_track::EFFECT)
+            .map_or(filmcraft_render::track::PlanarOptions::default().depth_strength, |e| e.f64_at("depth", ph) / 100.0),
+    };
     let run = move || {
         use std::sync::atomic::Ordering;
         let t0 = web_time::Instant::now();
@@ -674,7 +682,7 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
             Some((first, mut k_prev)) => {
                 lock(&out).push((mt0, path.clone()));
                 let region0: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
-                let mut tracker = filmcraft_render::track::AnyTracker::new(first, &region0, method);
+                let mut tracker = filmcraft_render::track::AnyTracker::with_options(first, &region0, method, planar);
                 for step in 1..=steps {
                     if prog.cancel.load(Ordering::Relaxed) {
                         err = Some("stopped".into());
