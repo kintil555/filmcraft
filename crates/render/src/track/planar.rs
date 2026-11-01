@@ -31,6 +31,7 @@ use rayon::prelude::*;
 
 /// Inlier threshold of the homography fit, in pixels (looser than the similarity fit: a plane in
 /// perspective is not perfectly modelled by sparse, sub-pixel features).
+#[cfg(test)]
 const THRESHOLD: f64 = 1.5;
 const ITERS: usize = 400;
 /// Fewest inliers a frame-to-frame fit needs.
@@ -205,11 +206,12 @@ fn blend(a: &Homography, b: &Homography, t: f64) -> Homography {
 }
 
 /// RANSAC (four-point samples) + least-squares refit. Returns (homography, inlier count).
+#[cfg(test)]
 pub fn fit_robust(src: &[Vec2], dst: &[Vec2]) -> Option<(Homography, usize)> {
     fit_robust_with(src, dst, THRESHOLD).map(|(h, inl)| (h, inl.len()))
 }
 
-/// [`fit_robust`] with an explicit inlier `threshold` (px); returns the inlier indices.
+/// `fit_robust` with an explicit inlier `threshold` (px); returns the inlier indices.
 fn fit_robust_with(src: &[Vec2], dst: &[Vec2], threshold: f64) -> Option<(Homography, Vec<usize>)> {
     let n = src.len();
     if n < 4 || dst.len() != n || !threshold.is_finite() || threshold <= 0.0 {
