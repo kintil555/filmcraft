@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 filmcraft-time = { workspace = true }
 filmcraft-geom = { workspace = true }
+filmcraft-depth = { workspace = true }
 filmcraft-color = { workspace = true }
 filmcraft-frame = { workspace = true }
 filmcraft-media = { workspace = true }

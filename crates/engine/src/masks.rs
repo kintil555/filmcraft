@@ -605,6 +605,23 @@ pub struct PendingTrack {
     applied: usize,
 }
 
+/// The neural depth model planar tracking uses: the folder named by `FILMCRAFT_DEPTH_MODEL`
+/// (Depth Anything V2 Small, see `crates/depth/README.md`). `Ok(None)` when none is configured or
+/// the engine is built without the `depth-anything` feature; `Err` when the folder is configured
+/// but the model does not load (tracking then goes on without depth).
+fn depth_estimator() -> std::result::Result<Option<Box<dyn filmcraft_depth::Estimator>>, String> {
+    #[cfg(feature = "depth-anything")]
+    {
+        let Some(dir) = std::env::var_os("FILMCRAFT_DEPTH_MODEL") else { return Ok(None) };
+        let model = filmcraft_depth::DepthAnything::load(std::path::Path::new(&dir)).map_err(|e| e.to_string())?;
+        Ok(Some(Box::new(model)))
+    }
+    #[cfg(not(feature = "depth-anything"))]
+    {
+        Ok(None)
+    }
+}
+
 /// Longest side of the frames the tracker works on (speed; the result is in clip pixels).
 const TRACK_MAX_WIDTH: f64 = 960.0;
 
@@ -669,32 +686,45 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
     let run = move || {
         use std::sync::atomic::Ordering;
         let t0 = web_time::Instant::now();
-        let gray = |t: Tick| -> Option<(filmcraft_render::track::Prepared, f64)> {
+        // planar tracking can use a neural depth model (see `depth_estimator`); without one, or when
+        // it fails on a frame, the tracker works from parallax alone
+        let (estimator, depth_note) = match method {
+            TrackMethod::Perspective => match depth_estimator() {
+                Ok(e) => (e, String::new()),
+                Err(e) => (None, format!(" · depth model off: {e}")),
+            },
+            _ => (None, String::new()),
+        };
+        let gray = |t: Tick| -> Option<(filmcraft_render::track::Prepared, f64, Option<filmcraft_depth::DepthMap>)> {
             let f = src.video_frame(filmcraft_media::FrameRequest { time: t, scale }).ok()?;
-            let g = filmcraft_render::track::Gray::from_rgba8(f.width as usize, f.height as usize, &f.to_rgba8());
-            Some((filmcraft_render::track::Prepared::new(g), f.width as f64 / size.0.max(1) as f64))
+            let (w, h) = (f.width as usize, f.height as usize);
+            let rgba = f.to_rgba8();
+            let depth = estimator.as_ref().and_then(|e| e.estimate(&rgba, w, h).ok());
+            let g = filmcraft_render::track::Gray::from_rgba8(w, h, &rgba);
+            Some((filmcraft_render::track::Prepared::new(g), f.width as f64 / size.0.max(1) as f64, depth))
         };
         let mut path = start_path;
         let mut err: Option<String> = None;
         let mut done = 0u64;
         match gray(mt0) {
             None => err = Some("can't decode the clip".into()),
-            Some((first, mut k_prev)) => {
+            Some((first, mut k_prev, first_depth)) => {
                 lock(&out).push((mt0, path.clone()));
                 let region0: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
                 let mut tracker = filmcraft_render::track::AnyTracker::with_options(first, &region0, method, planar);
+                tracker.set_depth(first_depth);
                 for step in 1..=steps {
                     if prog.cancel.load(Ordering::Relaxed) {
                         err = Some("stopped".into());
                         break;
                     }
                     let t = if backward { mt0 - Tick(fd.0 * step as i64) } else { mt0 + Tick(fd.0 * step as i64) };
-                    let Some((next, k)) = gray(t) else {
+                    let Some((next, k, next_depth)) = gray(t) else {
                         err = Some(format!("can't decode frame {step}"));
                         break;
                     };
                     let region: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
-                    let Some(st) = tracker.advance(next, &region) else {
+                    let Some(st) = tracker.advance_with_depth(next, &region, next_depth) else {
                         err = Some(format!("lost track after {} frame(s): the mask's content could not be found again", step - 1));
                         break;
                     };
@@ -708,7 +738,7 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                     done += 1;
                     prog.done.store(done, Ordering::Relaxed);
                     let note = step_note(&st);
-                    *lock(&prog.status) = format!("Frame {step} of {steps} · {} features{note}", st.inliers);
+                    *lock(&prog.status) = format!("Frame {step} of {steps} · {} features{note}{depth_note}", st.inliers);
                     k_prev = k;
                 }
             }

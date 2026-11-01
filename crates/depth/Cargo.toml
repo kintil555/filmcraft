@@ -1,0 +1,21 @@
+[package]
+name = "filmcraft-depth"
+description = "FilmCraft monocular depth: the DepthMap type, the Estimator trait and (feature depth-anything) Depth Anything V2 Small inference on candle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Depth Anything V2 Small on the CPU via candle (pure Rust). Off by default (and in wasm builds).
+depth-anything = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+
+[dependencies]
+thiserror = { workspace = true }
+candle-core = { version = "0.9", default-features = false, optional = true }
+candle-nn = { version = "0.9", default-features = false, optional = true }
+candle-transformers = { version = "0.9", default-features = false, optional = true }

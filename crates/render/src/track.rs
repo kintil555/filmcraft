@@ -605,12 +605,24 @@ impl AnyTracker {
         }
     }
 
+    /// Give the neural depth of the frame the tracker starts on (planar tracking only).
+    pub fn set_depth(&mut self, depth: Option<filmcraft_depth::DepthMap>) {
+        if let AnyTracker::Planar(t) = self {
+            t.set_depth(depth);
+        }
+    }
+
     pub fn advance(&mut self, next: Prepared, region: &[Vec2]) -> Option<AnyStep> {
+        self.advance_with_depth(next, region, None)
+    }
+
+    /// [`AnyTracker::advance`] with the neural depth of `next` (planar tracking only).
+    pub fn advance_with_depth(&mut self, next: Prepared, region: &[Vec2], depth: Option<filmcraft_depth::DepthMap>) -> Option<AnyStep> {
         match self {
             AnyTracker::Similarity(t) => {
                 t.advance(next, region).map(|s| AnyStep { motion: Motion::Affine(s.transform), inliers: s.inliers, coasting: s.coasting, anchored: s.anchored })
             }
-            AnyTracker::Planar(t) => t.advance(next, region).map(|s| AnyStep {
+            AnyTracker::Planar(t) => t.advance_with_depth(next, region, depth).map(|s| AnyStep {
                 motion: Motion::Perspective(s.homography),
                 inliers: s.inliers,
                 coasting: s.coasting,

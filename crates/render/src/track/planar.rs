@@ -24,6 +24,7 @@
 //!   when it comes back, instead of ending the track.
 
 use super::{ANCHOR_FB_MAX, FB_MAX, MAX_COAST, MAX_FEATURES, Prepared, Rng, features, lk, lk_from};
+use filmcraft_depth::DepthMap;
 use filmcraft_geom::{Homography, Vec2};
 use filmcraft_project::TrackMethod;
 use rayon::prelude::*;
@@ -52,6 +53,12 @@ const COVERAGE_SIMILARITY: f64 = 0.15;
 const COVERAGE_SHIFT: f64 = 0.04;
 /// Inliers whose spread has a minor/major variance ratio below this are treated as collinear.
 const MIN_SPREAD_RATIO: f64 = 0.01;
+/// How far (fraction of the normalised 0..1 neural depth range) a feature may sit off the plane's
+/// depth at depth strength 0 (tolerant) and 1 (strict).
+const DEPTH_TOL_LOOSE: f64 = 0.45;
+const DEPTH_TOL_TIGHT: f64 = 0.08;
+/// Fewest matches a depth plane is fitted through.
+const MIN_DEPTH_POINTS: usize = 6;
 /// Residual (px) at which a feature counts as half-way off the plane in [`DepthSample::parallax`].
 const PARALLAX_HALF: f64 = 1.0;
 
@@ -69,10 +76,19 @@ impl Default for PlanarOptions {
 }
 
 impl PlanarOptions {
-    /// Inlier threshold in pixels for this depth strength (a NaN strength reads as the default).
+    /// The depth strength as a number in 0..=1 (a NaN strength reads as the default).
+    fn strength(&self) -> f64 {
+        if self.depth_strength.is_finite() { self.depth_strength.clamp(0.0, 1.0) } else { Self::default().depth_strength }
+    }
+
+    /// Inlier threshold in pixels for this depth strength.
     pub fn threshold(&self) -> f64 {
-        let s = if self.depth_strength.is_finite() { self.depth_strength.clamp(0.0, 1.0) } else { Self::default().depth_strength };
-        THRESHOLD_LOOSE + (THRESHOLD_TIGHT - THRESHOLD_LOOSE) * s
+        THRESHOLD_LOOSE + (THRESHOLD_TIGHT - THRESHOLD_LOOSE) * self.strength()
+    }
+
+    /// How far (fraction of the neural depth range) a feature may sit off the plane's depth.
+    pub fn depth_tolerance(&self) -> f64 {
+        DEPTH_TOL_LOOSE + (DEPTH_TOL_TIGHT - DEPTH_TOL_LOOSE) * self.strength()
     }
 }
 
@@ -276,6 +292,62 @@ fn depth_samples(h: &Homography, src: &[Vec2], dst: &[Vec2]) -> Vec<DepthSample>
         .collect()
 }
 
+/// Neural depth as an affine function of the picture position, `z = a·(x - mx) + b·(y - my) + c`:
+/// inverse depth is affine across a plane, which is what makes a slanted wall a single plane here.
+struct DepthPlane {
+    mx: f64,
+    my: f64,
+    a: f64,
+    b: f64,
+    c: f64,
+}
+
+impl DepthPlane {
+    /// Least-squares plane through `(x, y, z)` points; `None` for too few or collinear points.
+    fn fit(pts: &[(f64, f64, f64)]) -> Option<Self> {
+        if pts.len() < MIN_DEPTH_POINTS {
+            return None;
+        }
+        let n = pts.len() as f64;
+        let (mx, my, c) = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n, pts.iter().map(|p| p.2).sum::<f64>() / n);
+        let (mut sxx, mut sxy, mut syy, mut sxz, mut syz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for &(x, y, z) in pts {
+            let (dx, dy, dz) = (x - mx, y - my, z - c);
+            sxx += dx * dx;
+            sxy += dx * dy;
+            syy += dy * dy;
+            sxz += dx * dz;
+            syz += dy * dz;
+        }
+        let det = sxx * syy - sxy * sxy;
+        if !det.is_finite() || sxx <= 1e-12 || syy <= 1e-12 || det <= 1e-6 * sxx * syy {
+            return None;
+        }
+        let (a, b) = ((sxz * syy - syz * sxy) / det, (syz * sxx - sxz * sxy) / det);
+        (a.is_finite() && b.is_finite()).then_some(Self { mx, my, a, b, c })
+    }
+
+    fn at(&self, x: f64, y: f64) -> f64 {
+        self.a * (x - self.mx) + self.b * (y - self.my) + self.c
+    }
+}
+
+/// Which of the matches `src` lie on one depth plane of `depth` (within `tol` of the 0..1 depth
+/// range), refitting the plane on the survivors. `None` when the depth cannot decide (too few
+/// matches, or a degenerate layout), in which case no match is rejected.
+fn depth_keep(src: &[Vec2], depth: &DepthMap, tol: f64) -> Option<Vec<bool>> {
+    let z: Vec<f64> = src.iter().map(|p| depth.sample(p.x, p.y) as f64).collect();
+    let mut keep = vec![true; src.len()];
+    for cut in [tol * 3.0, tol * 1.5, tol] {
+        let pts: Vec<(f64, f64, f64)> = src.iter().zip(&z).zip(&keep).filter(|(_, k)| **k).map(|((p, z), _)| (p.x, p.y, *z)).collect();
+        let plane = DepthPlane::fit(&pts)?;
+        for ((p, z), k) in src.iter().zip(&z).zip(keep.iter_mut()) {
+            *k = (z - plane.at(p.x, p.y)).abs() <= cut;
+        }
+    }
+    Some(keep)
+}
+
 /// A frame-to-frame fit.
 struct FrameFit {
     h: Homography,
@@ -285,8 +357,9 @@ struct FrameFit {
     depth: Vec<DepthSample>,
 }
 
-/// Frame-to-frame planar step from `a` to `b` over the picture inside `region`.
-fn step(a: &Prepared, b: &Prepared, region: &[Vec2], threshold: f64) -> Option<FrameFit> {
+/// Frame-to-frame planar step from `a` to `b` over the picture inside `region`. `depth` is the
+/// neural depth of `a`: matches off the plane's depth are left out of the fit.
+fn step(a: &Prepared, b: &Prepared, region: &[Vec2], options: &PlanarOptions, depth: Option<&DepthMap>) -> Option<FrameFit> {
     let feats = features(a.base(), region, MAX_FEATURES, 5.0);
     if feats.len() < MIN_INLIERS {
         return None;
@@ -300,11 +373,18 @@ fn step(a: &Prepared, b: &Prepared, region: &[Vec2], threshold: f64) -> Option<F
             (fb < FB_MAX).then(|| (Vec2::new(p[0] as f64, p[1] as f64), Vec2::new(q[0] as f64, q[1] as f64)))
         })
         .collect();
-    let (src, dst): (Vec<Vec2>, Vec<Vec2>) = pairs.into_iter().unzip();
+    let (all_src, all_dst): (Vec<Vec2>, Vec<Vec2>) = pairs.into_iter().unzip();
+    let (src, dst): (Vec<Vec2>, Vec<Vec2>) = match depth.and_then(|d| depth_keep(&all_src, d, options.depth_tolerance())) {
+        Some(keep) if keep.iter().filter(|k| **k).count() >= MIN_INLIERS => {
+            all_src.iter().zip(&all_dst).zip(&keep).filter(|(_, k)| **k).map(|((s, d), _)| (*s, *d)).unzip()
+        }
+        _ => (all_src.clone(), all_dst.clone()),
+    };
+    let threshold = options.threshold();
     // a strict depth setting that leaves too few plane features falls back to the tolerant fit
     let (h, inliers) =
         fit_model(&src, &dst, region, threshold).filter(|(_, n)| *n >= MIN_INLIERS).or_else(|| fit_model(&src, &dst, region, THRESHOLD_LOOSE))?;
-    (inliers >= MIN_INLIERS).then(|| FrameFit { h, features: feats.len(), tracked: src.len(), inliers, depth: depth_samples(&h, &src, &dst) })
+    (inliers >= MIN_INLIERS).then(|| FrameFit { h, features: feats.len(), tracked: src.len(), inliers, depth: depth_samples(&h, &all_src, &all_dst) })
 }
 
 /// Stateful planar tracker: [`step`] frame to frame with anchor drift correction and coasting
@@ -321,8 +401,9 @@ pub struct PlanarTracker {
     coasted: usize,
     /// The previous step saw the region mostly off the canvas.
     was_off_canvas: bool,
-    /// Inlier threshold (px) from the depth strength.
-    threshold: f64,
+    options: PlanarOptions,
+    /// Neural depth of `prev`, when a depth model is running.
+    prev_depth: Option<DepthMap>,
 }
 
 impl PlanarTracker {
@@ -343,13 +424,25 @@ impl PlanarTracker {
             velocity: Homography::IDENTITY,
             coasted: 0,
             was_off_canvas: false,
-            threshold: options.threshold(),
+            options,
+            prev_depth: None,
         }
+    }
+
+    /// Give the neural depth of the frame the tracker is on (call right after construction).
+    pub fn set_depth(&mut self, depth: Option<DepthMap>) {
+        self.prev_depth = depth;
     }
 
     /// Advance to `next`; `region` is the plane's polygon in the previous frame's pixels. The
     /// returned homography maps previous-frame pixels to `next`'s. `None` once the track is lost.
     pub fn advance(&mut self, next: Prepared, region: &[Vec2]) -> Option<PlanarStep> {
+        self.advance_with_depth(next, region, None)
+    }
+
+    /// [`PlanarTracker::advance`] that also takes the neural depth of `next` (kept for the step
+    /// after this one, where it tells the plane's features from the rest).
+    pub fn advance_with_depth(&mut self, next: Prepared, region: &[Vec2], next_depth: Option<DepthMap>) -> Option<PlanarStep> {
         let (fw, fh) = (next.base().w, next.base().h);
         // a region that is (about to be) mostly outside the canvas has nothing to track: coast
         // on its motion, and take it up again when it comes back
@@ -361,64 +454,8 @@ impl PlanarTracker {
             self.coasted = self.coasted.min(MAX_COAST / 2);
         }
         self.was_off_canvas = off_canvas;
-        let ff = step(&self.prev, &next, region, self.threshold).filter(|f| plausible(&f.h, region));
-        let (mut st, coasting) = match ff {
-            Some(f) => {
-                self.velocity = f.h;
-                self.coasted = 0;
-                (
-                    PlanarStep {
-                        homography: f.h,
-                        features: f.features,
-                        tracked: f.tracked,
-                        inliers: f.inliers,
-                        coasting: false,
-                        anchored: false,
-                        off_canvas,
-                        depth: f.depth,
-                    },
-                    false,
-                )
-            }
-            None => {
-                self.coasted += 1;
-                if self.coasted > max_coast {
-                    return None;
-                }
-                self.velocity = damp(&self.velocity, damping);
-                (
-                    PlanarStep {
-                        homography: self.velocity,
-                        features: 0,
-                        tracked: 0,
-                        inliers: 0,
-                        coasting: true,
-                        anchored: false,
-                        off_canvas,
-                        depth: Vec::new(),
-                    },
-                    true,
-                )
-            }
-        };
-        let pred = st.homography.then_apply(&self.anchor_to_prev);
-        let mut anchor_to_next = pred;
-        let mut renew = !coasting;
-        let expected = self.expected_in_frame(&pred, fw, fh);
-        if let Some((t_abs, inl)) = self.register_anchor(&next, &pred) {
-            let refined = self.anchor_to_prev.inverse().map(|inv| t_abs.then_apply(&inv)).filter(|r| plausible(r, region));
-            if let (Some(r), true) = (refined, inl >= (expected / 3).max(MIN_INLIERS)) {
-                st = PlanarStep { homography: r, inliers: inl, anchored: true, ..st };
-                anchor_to_next = t_abs;
-                renew = inl * 2 < expected;
-                if coasting {
-                    // the anchor re-acquired the plane
-                    self.coasted = 0;
-                    self.velocity = r;
-                    st.coasting = false;
-                }
-            }
-        }
+        let (st, coasting) = self.frame_motion(&next, region, off_canvas, (max_coast, damping))?;
+        let (mut st, mut anchor_to_next, mut renew) = self.refine(&next, region, st, coasting, (fw, fh));
         let region_next = match warp_all(&st.homography, region) {
             Some(r) => r,
             None => {
@@ -433,6 +470,7 @@ impl PlanarTracker {
         };
         self.anchor_to_prev = anchor_to_next;
         self.prev = next;
+        self.prev_depth = next_depth;
         if renew {
             let feats = features(self.prev.base(), &region_next, MAX_FEATURES, 5.0);
             if feats.len() >= MIN_INLIERS {
@@ -443,6 +481,72 @@ impl PlanarTracker {
             }
         }
         Some(st)
+    }
+
+    /// Frame-to-frame motion to `next`, or the damped last motion when the match fails. `limits`
+    /// is (most frames to coast, damping). Returns the step and whether it is coasting; `None` once
+    /// the coasting has run out.
+    fn frame_motion(&mut self, next: &Prepared, region: &[Vec2], off_canvas: bool, limits: (usize, f64)) -> Option<(PlanarStep, bool)> {
+        let (max_coast, damping) = limits;
+        let ff = step(&self.prev, next, region, &self.options, self.prev_depth.as_ref()).filter(|f| plausible(&f.h, region));
+        match ff {
+            Some(f) => {
+                self.velocity = f.h;
+                self.coasted = 0;
+                let st = PlanarStep {
+                    homography: f.h,
+                    features: f.features,
+                    tracked: f.tracked,
+                    inliers: f.inliers,
+                    coasting: false,
+                    anchored: false,
+                    off_canvas,
+                    depth: f.depth,
+                };
+                Some((st, false))
+            }
+            None => {
+                self.coasted += 1;
+                if self.coasted > max_coast {
+                    return None;
+                }
+                self.velocity = damp(&self.velocity, damping);
+                let st = PlanarStep {
+                    homography: self.velocity,
+                    features: 0,
+                    tracked: 0,
+                    inliers: 0,
+                    coasting: true,
+                    anchored: false,
+                    off_canvas,
+                    depth: Vec::new(),
+                };
+                Some((st, true))
+            }
+        }
+    }
+
+    /// Drift correction of `st` against the anchor frame. Returns the (possibly refined) step, the
+    /// anchor → next motion, and whether the anchor should be renewed on this frame.
+    fn refine(&mut self, next: &Prepared, region: &[Vec2], st: PlanarStep, coasting: bool, (fw, fh): (usize, usize)) -> (PlanarStep, Homography, bool) {
+        let pred = st.homography.then_apply(&self.anchor_to_prev);
+        let (mut st, mut anchor_to_next, mut renew) = (st, pred, !coasting);
+        let expected = self.expected_in_frame(&pred, fw, fh);
+        if let Some((t_abs, inl)) = self.register_anchor(next, &pred) {
+            let refined = self.anchor_to_prev.inverse().map(|inv| t_abs.then_apply(&inv)).filter(|r| plausible(r, region));
+            if let (Some(r), true) = (refined, inl >= (expected / 3).max(MIN_INLIERS)) {
+                st = PlanarStep { homography: r, inliers: inl, anchored: true, ..st };
+                anchor_to_next = t_abs;
+                renew = inl * 2 < expected;
+                if coasting {
+                    // the anchor re-acquired the plane
+                    self.coasted = 0;
+                    self.velocity = r;
+                    st.coasting = false;
+                }
+            }
+        }
+        (st, anchor_to_next, renew)
     }
 
     /// How many anchor features `pred` (anchor → next) puts inside the `w`×`h` canvas.
@@ -473,7 +577,7 @@ impl PlanarTracker {
             })
             .collect();
         let (src, dst): (Vec<Vec2>, Vec<Vec2>) = pairs.into_iter().unzip();
-        fit_model(&src, &dst, &self.anchor_region, self.threshold)
+        fit_model(&src, &dst, &self.anchor_region, self.options.threshold())
     }
 }
 
@@ -666,5 +770,41 @@ mod tests {
         assert!((visible_fraction(&r(80.0, 120.0), 100, 100) - 0.5).abs() < 1e-9);
         assert_eq!(visible_fraction(&r(200.0, 240.0), 100, 100), 0.0);
         assert_eq!(visible_fraction(&[], 100, 100), 0.0);
+    }
+
+    #[test]
+    fn depth_keep_rejects_features_at_another_depth() {
+        // a slanted plane (inverse depth affine in x) with a near object in front of it
+        let (w, h) = (320usize, 240usize);
+        let px: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                if (100.0..160.0).contains(&x) && (50.0..100.0).contains(&y) { 0.95 } else { 0.5 + 0.001 * x }
+            })
+            .collect();
+        let depth = DepthMap::new(w, h, px).expect("map");
+        let src: Vec<Vec2> = (0..7).flat_map(|i| (0..6).map(move |j| Vec2::new(30.0 + 40.0 * i as f64, 30.0 + 30.0 * j as f64))).collect();
+        let tol = PlanarOptions { depth_strength: 1.0 }.depth_tolerance();
+        let keep = depth_keep(&src, &depth, tol).expect("decides");
+        for (p, k) in src.iter().zip(&keep) {
+            let in_front = (100.0..160.0).contains(&p.x) && (50.0..100.0).contains(&p.y);
+            assert_eq!(*k, !in_front, "feature at {p:?}");
+        }
+    }
+
+    #[test]
+    fn depth_cannot_decide_without_enough_matches() {
+        let depth = DepthMap::new(8, 8, vec![0.5; 64]).expect("map");
+        let few = [Vec2::new(1.0, 1.0), Vec2::new(5.0, 2.0), Vec2::new(3.0, 6.0)];
+        assert!(depth_keep(&few, &depth, 0.1).is_none());
+        let line: Vec<Vec2> = (0..8).map(|i| Vec2::new(i as f64, i as f64)).collect();
+        assert!(depth_keep(&line, &depth, 0.1).is_none(), "collinear matches pin no plane");
+    }
+
+    #[test]
+    fn depth_strength_tightens_the_depth_tolerance() {
+        let at = |s: f64| PlanarOptions { depth_strength: s }.depth_tolerance();
+        assert!(at(1.0) < at(0.6) && at(0.6) < at(0.0));
+        assert_eq!(at(f64::NAN), at(PlanarOptions::default().depth_strength));
     }
 }
