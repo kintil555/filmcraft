@@ -36,6 +36,10 @@ off-canvas coasting (`MAX_COAST_OFF_CANVAS`), parallax `DepthSample`s, `PlanarOp
 - The new tests (off-canvas, sparse coverage, depth plane) have never run; if `leaving_the_canvas_keeps_the_track`
   is flaky, check the thresholds before the logic.
 - No model download or pinned SHA-256 (the speech crate has that pattern, `speech::models`).
-- Depth runs on every tracked frame (~1 s each on CPU); a stride option would help.
+- Depth runs on every tracked frame by default (~1 s each on CPU). `FILMCRAFT_DEPTH_STRIDE=N` (1–30)
+  runs it every Nth frame and reuses the last map in between (`masks.rs`, `depth_stride`); unbuilt.
+- Checked 2026-11-01: the Depth Detection slider needs no panel change (`effect_controls.rs` draws
+  every param but `links`). `Cargo.lock` still lacks `filmcraft-depth` and `candle-transformers`
+  (no cargo in the sandbox): run `cargo metadata` and commit it.
 - Rules that bit this work: never-crash (no `unwrap`/indexing outside tests), `too_many_arguments`
   and `cognitive_complexity` are deny, commits end with the attribution lines.

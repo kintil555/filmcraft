@@ -622,6 +622,13 @@ fn depth_estimator() -> std::result::Result<Option<Box<dyn filmcraft_depth::Esti
     }
 }
 
+/// Run the depth model on every Nth tracked frame (`FILMCRAFT_DEPTH_STRIDE`, 1 to 30, default 1);
+/// the frames in between reuse the last depth map. The model costs about a second per frame on the
+/// CPU, so a stride of 2 to 4 speeds long tracks up at a small cost in plane selection.
+fn depth_stride() -> u64 {
+    std::env::var("FILMCRAFT_DEPTH_STRIDE").ok().and_then(|v| v.trim().parse::<u64>().ok()).map_or(1, |n| n.clamp(1, 30))
+}
+
 /// Longest side of the frames the tracker works on (speed; the result is in clip pixels).
 const TRACK_MAX_WIDTH: f64 = 960.0;
 
@@ -695,34 +702,41 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
             },
             _ => (None, String::new()),
         };
-        let gray = |t: Tick| -> Option<(filmcraft_render::track::Prepared, f64, Option<filmcraft_depth::DepthMap>)> {
+        let gray = |t: Tick, with_depth: bool| -> Option<(filmcraft_render::track::Prepared, f64, Option<filmcraft_depth::DepthMap>)> {
             let f = src.video_frame(filmcraft_media::FrameRequest { time: t, scale }).ok()?;
             let (w, h) = (f.width as usize, f.height as usize);
             let rgba = f.to_rgba8();
-            let depth = estimator.as_ref().and_then(|e| e.estimate(&rgba, w, h).ok());
+            let depth = if with_depth { estimator.as_ref().and_then(|e| e.estimate(&rgba, w, h).ok()) } else { None };
             let g = filmcraft_render::track::Gray::from_rgba8(w, h, &rgba);
             Some((filmcraft_render::track::Prepared::new(g), f.width as f64 / size.0.max(1) as f64, depth))
         };
         let mut path = start_path;
         let mut err: Option<String> = None;
         let mut done = 0u64;
-        match gray(mt0) {
+        match gray(mt0, true) {
             None => err = Some("can't decode the clip".into()),
             Some((first, mut k_prev, first_depth)) => {
                 lock(&out).push((mt0, path.clone()));
                 let region0: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
                 let mut tracker = filmcraft_render::track::AnyTracker::with_options(first, &region0, method, planar);
-                tracker.set_depth(first_depth);
+                tracker.set_depth(first_depth.clone());
+                let stride = depth_stride();
+                let mut last_depth = first_depth;
                 for step in 1..=steps {
                     if prog.cancel.load(Ordering::Relaxed) {
                         err = Some("stopped".into());
                         break;
                     }
                     let t = if backward { mt0 - Tick(fd.0 * step as i64) } else { mt0 + Tick(fd.0 * step as i64) };
-                    let Some((next, k, next_depth)) = gray(t) else {
+                    let Some((next, k, fresh_depth)) = gray(t, step.is_multiple_of(stride)) else {
                         err = Some(format!("can't decode frame {step}"));
                         break;
                     };
+                    // frames between two depth runs reuse the last map
+                    if fresh_depth.is_some() {
+                        last_depth.clone_from(&fresh_depth);
+                    }
+                    let next_depth = if stride > 1 { fresh_depth.or_else(|| last_depth.clone()) } else { fresh_depth };
                     let region: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
                     let Some(st) = tracker.advance_with_depth(next, &region, next_depth) else {
                         err = Some(format!("lost track after {} frame(s): the mask's content could not be found again", step - 1));
